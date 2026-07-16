@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300;0,700;1,900&display=swap" rel="stylesheet">
-    
+
     <style>
         :root {
             --bg-dark: #121214;
@@ -56,7 +56,7 @@
 
         /* --- LANDING PAGE --- */
         #landing-screen {
-            background: linear-gradient(135deg, rgba(18, 18, 20, 0.92) 0%, rgba(26, 26, 30, 0.98) 100%), 
+            background: linear-gradient(135deg, rgba(18, 18, 20, 0.92) 0%, rgba(26, 26, 30, 0.98) 100%),
                         url('https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80') center/cover no-repeat;
             display: flex;
             flex-direction: column;
@@ -274,6 +274,47 @@
             color: var(--neon-pink);
             margin-bottom: 1rem;
             font-style: italic;
+        }
+
+        /* --- LOCATION GATE (merged from short version) --- */
+        #location-gate {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(18, 18, 20, 0.97);
+            z-index: 1200;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        #location-gate.hidden {
+            display: none;
+        }
+
+        #location-gate h2 {
+            font-size: 1.6rem;
+            font-weight: 900;
+            font-style: italic;
+            text-transform: uppercase;
+            color: var(--text-light);
+            margin-bottom: 0.8rem;
+        }
+
+        #location-gate p {
+            font-size: 0.85rem;
+            color: #a0a5c0;
+            margin-bottom: 1.6rem;
+            max-width: 320px;
+        }
+
+        #location-gate .btn {
+            max-width: 320px;
         }
 
         #map {
@@ -583,7 +624,7 @@
             background: none;
             border: none;
         }
-        
+
         .avatar-glow {
             width: 32px;
             height: 32px;
@@ -669,7 +710,7 @@
 
         <div class="auth-container">
             <h2 class="auth-title" id="form-title">Become a Member</h2>
-            
+
             <form id="auth-form" onsubmit="handleAuth(event)">
                 <div class="input-group" id="name-group">
                     <label>First Name</label>
@@ -709,6 +750,13 @@
             </div>
             <div class="hero-tagline" style="font-size: 0.75rem; margin: 0; color: var(--neon-pink);">STREET SWEEP</div>
         </nav>
+
+        <!-- Location permission gate (merged from short version) -->
+        <div id="location-gate">
+            <h2>DotRunner</h2>
+            <p>Sta locatie toe om de kaart in jouw buurt te zien en straten te kunnen claimen.</p>
+            <button class="btn" onclick="startLocationTracking()">Deel Locatie &amp; Start</button>
+        </div>
 
         <div id="gps-warning">
             GPS is required to track your run. Please click 'Allow' in your browser pop-up or enable location services in your phone's settings.
@@ -828,7 +876,7 @@
             </div>
         </div>
 
-        <button class="btn" onclick="closeSummary()">Close & Save Run</button>
+        <button class="btn" onclick="closeSummary()">Close &amp; Save Run</button>
     </div>
 
     <!-- Leaflet JS -->
@@ -842,7 +890,8 @@
         let userMarker = null;
         let watchId = null;
         let runActive = false;
-        
+        let locationStarted = false;
+
         let secondsElapsed = 0;
         let timerInterval = null;
         let claimedStreetsInCurrentRun = 0;
@@ -850,22 +899,49 @@
         let totalDistanceRun = 0.0;
         let lastLat = null;
         let lastLng = null;
-        let runCoordsPath = []; 
+        let runCoordsPath = [];
         let liveRouteLine = null;
-        
+
         let audioCtx = null;
         let activeStreets = [];
-        let currentActiveStreet = null; 
+        let currentActiveStreet = null;
 
         let speedLimitViolationTimer = 0;
         let speedViolationActive = false;
 
-        window.onload = function() {
-            const savedUser = localStorage.getItem('dotrunner_user');
-            if (savedUser) {
-                currentUser = JSON.parse(savedUser);
+        /* ---------- STORAGE HELPERS ----------
+           Personal data (accounts) uses shared:false.
+           Street claims use shared:true so EVERY user on the
+           platform sees the same claimed streets forever, until
+           somebody else runs that street and steals it. */
+
+        async function storageGetSafe(key, shared) {
+            try {
+                const result = await window.storage.get(key, shared);
+                return result ? result.value : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function storageSetSafe(key, value, shared) {
+            try {
+                await window.storage.set(key, value, shared);
+            } catch (e) {
+                console.warn('Storage write failed for', key, e);
+            }
+        }
+
+        async function loadCurrentUser() {
+            const raw = await storageGetSafe('dotrunner_current_user', false);
+            if (raw) {
+                currentUser = JSON.parse(raw);
                 goToGame();
             }
+        }
+
+        window.onload = function() {
+            loadCurrentUser();
         };
 
         function toggleAuthMode() {
@@ -895,18 +971,24 @@
             }
         }
 
-        function handleAuth(event) {
+        async function handleAuth(event) {
             event.preventDefault();
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
+            const submitBtn = document.getElementById('submit-btn');
+            const originalLabel = submitBtn.innerText;
+            submitBtn.innerText = "Please wait...";
+            submitBtn.disabled = true;
+
+            const userKey = `dotrunner_account_${email.toLowerCase()}`;
 
             if (isLoginMode) {
-                const storedUser = localStorage.getItem(`user_${email}`);
-                if (storedUser) {
-                    const parsed = JSON.parse(storedUser);
+                const storedRaw = await storageGetSafe(userKey, false);
+                if (storedRaw) {
+                    const parsed = JSON.parse(storedRaw);
                     if (parsed.password === password) {
                         currentUser = parsed;
-                        localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+                        await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
                         goToGame();
                     } else {
                         alert("Invalid password!");
@@ -917,7 +999,7 @@
             } else {
                 const firstName = document.getElementById('first-name').value.trim();
                 const lastName = document.getElementById('last-name').value.trim();
-                
+
                 currentUser = {
                     firstName,
                     lastName,
@@ -927,26 +1009,32 @@
                     streetsClaimed: 0
                 };
 
-                localStorage.setItem(`user_${email}`, JSON.stringify(currentUser));
-                localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+                await storageSetSafe(userKey, JSON.stringify(currentUser), false);
+                await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
                 goToGame();
             }
+
+            submitBtn.innerText = originalLabel;
+            submitBtn.disabled = false;
         }
 
         function goToGame() {
             document.getElementById('landing-screen').classList.add('hidden');
             document.getElementById('game-screen').classList.remove('hidden');
-            
+
             document.getElementById('nav-avatar').innerText = currentUser.firstName[0].toUpperCase();
             document.getElementById('nav-name').innerText = `${currentUser.firstName} ${currentUser.lastName}`;
             document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
 
-            initMap();
+            initMapShell();
             initAudio();
             updateLeaderboard();
         }
 
-        function initMap() {
+        /* Sets up the map + tiles right away, but does NOT start
+           watching GPS yet — that only happens once the user taps
+           the location-gate button (merged from the short version). */
+        function initMapShell() {
             map = L.map('map', {
                 zoomControl: false,
                 attributionControl: false
@@ -955,6 +1043,12 @@
             L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png', {
                 maxZoom: 20
             }).addTo(map);
+        }
+
+        function startLocationTracking() {
+            if (locationStarted) return;
+            locationStarted = true;
+            document.getElementById('location-gate').classList.add('hidden');
 
             if (navigator.geolocation) {
                 watchId = navigator.geolocation.watchPosition(onLocationSuccess, onLocationError, {
@@ -981,14 +1075,14 @@
                 let gain = audioCtx.createGain();
                 osc.connect(gain);
                 gain.connect(audioCtx.destination);
-                
+
                 osc.type = 'sine';
-                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
-                osc.frequency.setValueAtTime(880.00, audioCtx.currentTime + 0.08); 
-                
+                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(880.00, audioCtx.currentTime + 0.08);
+
                 gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-                
+
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.15);
             } catch (e) {
@@ -1000,7 +1094,7 @@
             document.getElementById('gps-warning').style.display = 'none';
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
-            const rawSpeed = position.coords.speed; 
+            const rawSpeed = position.coords.speed;
 
             map.setView([lat, lng], 17);
 
@@ -1026,7 +1120,7 @@
                     iconSize: [32, 32]
                 });
                 userMarker = L.marker([lat, lng], {icon: customIcon}).addTo(map);
-                
+
                 fetchRealStreets(lat, lng);
             } else {
                 userMarker.setLatLng([lat, lng]);
@@ -1048,10 +1142,10 @@
 
                 if (lastLat !== null && lastLng !== null) {
                     const distStep = getDistance(lastLat, lastLng, lat, lng) / 1000;
-                    if (distStep > 0.001) { 
+                    if (distStep > 0.001) {
                         totalDistanceRun += distStep;
                         document.getElementById('stat-distance').innerHTML = `${totalDistanceRun.toFixed(2)} <span style="font-size: 0.8rem;">km</span>`;
-                        
+
                         if (totalDistanceRun > 0) {
                             const min = (secondsElapsed / 60) / totalDistanceRun;
                             const paceMin = Math.floor(min);
@@ -1087,8 +1181,8 @@
 
         async function fetchRealStreets(lat, lng) {
             document.getElementById('loading-streets').style.display = 'block';
-            
-            const radius = 400; 
+
+            const radius = 400;
             const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|service|construction|platform|steps|path|cycleway"];out geom;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
@@ -1097,31 +1191,39 @@
             try {
                 const response = await fetch(url);
                 const data = await response.json();
-                
+
                 activeStreets.forEach(s => {
                     map.removeLayer(s.polyline);
                     if (s.labelTooltip) map.removeLayer(s.labelTooltip);
-                    s.dots.forEach(d => { if(d.marker) map.removeLayer(d.marker); });
+                    if (s.claimMarker) map.removeLayer(s.claimMarker);
+                    s.dots.forEach(d => { if (d.marker) map.removeLayer(d.marker); });
                 });
                 activeStreets = [];
 
                 if (data.elements) {
-                    data.elements.forEach((element, idx) => {
+                    for (let idx = 0; idx < data.elements.length; idx++) {
+                        const element = data.elements[idx];
                         if (element.geometry && element.geometry.length > 1) {
                             const coords = element.geometry.map(pt => [pt.lat, pt.lon]);
                             const streetName = element.tags.name || "Unnamed Path";
-                            
+
                             let streetDistanceMeters = 0;
                             for (let i = 0; i < coords.length - 1; i++) {
                                 streetDistanceMeters += getDistance(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]);
                             }
 
                             const uniqueColor = borderColors[idx % borderColors.length];
+                            const streetKey = `dotrunner_street_${element.id}`;
+
+                            // Check if this street was already claimed by ANYONE on the
+                            // platform. Claims are shared + permanent until stolen.
+                            const claimRaw = await storageGetSafe(streetKey, true);
+                            const claimData = claimRaw ? JSON.parse(claimRaw) : null;
 
                             const polyline = L.polyline(coords, {
-                                color: uniqueColor,
-                                opacity: 0.45,
-                                weight: 10, 
+                                color: claimData ? 'var(--neon-green)' : uniqueColor,
+                                opacity: claimData ? 0.95 : 0.45,
+                                weight: claimData ? 12 : 10,
                                 lineCap: 'round'
                             }).addTo(map);
 
@@ -1131,11 +1233,23 @@
                             const labelTooltip = L.tooltip({
                                 permanent: true,
                                 direction: 'center',
-                                className: 'street-label-tooltip'
+                                className: claimData ? 'street-label-tooltip claimed' : 'street-label-tooltip'
                             })
-                            .setContent(`${streetName} (${Math.round(streetDistanceMeters)}m)`)
+                            .setContent(claimData
+                                ? `Claimed by ${claimData.claimedBy} (${Math.round(streetDistanceMeters)}m)`
+                                : `${streetName} (${Math.round(streetDistanceMeters)}m)`)
                             .setLatLng(midPoint)
                             .addTo(map);
+
+                            let claimMarker = null;
+                            if (claimData) {
+                                const claimedIcon = L.divIcon({
+                                    className: 'custom-avatar-marker',
+                                    html: `<div class="avatar-claimed-floating">${claimData.claimedBy.charAt(0).toUpperCase()}</div>`,
+                                    iconSize: [26, 26]
+                                });
+                                claimMarker = L.marker(midPoint, {icon: claimedIcon}).addTo(map);
+                            }
 
                             let dots = [];
                             const segmentStep = Math.max(1, Math.floor((coords.length - 1) / 4));
@@ -1162,18 +1276,21 @@
 
                             activeStreets.push({
                                 id: element.id,
+                                streetKey: streetKey,
                                 name: streetName,
                                 distanceMeters: streetDistanceMeters,
                                 polyline: polyline,
                                 labelTooltip: labelTooltip,
+                                claimMarker: claimMarker,
                                 dots: dots,
-                                claimed: false,
+                                claimed: !!claimData,
+                                claimedBy: claimData ? claimData.claimedBy : null,
                                 uniqueColor: uniqueColor,
                                 midPoint: midPoint,
                                 dotsClaimedCount: 0
                             });
                         }
-                    });
+                    }
                 }
             } catch (error) {
                 console.error("Error fetching streets: ", error);
@@ -1184,14 +1301,12 @@
 
         function checkDotCollisions(playerLat, playerLng) {
             activeStreets.forEach(street => {
-                if (street.claimed) return;
-
                 street.dots.forEach(dot => {
                     if (dot.eaten) return;
 
                     let dist = getDistance(playerLat, playerLng, dot.lat, dot.lng);
-                    if (dist <= 15) { 
-                        
+                    if (dist <= 15) {
+
                         if (currentActiveStreet !== null && currentActiveStreet.id !== street.id) {
                             resetActiveStreetProgress(currentActiveStreet);
                         }
@@ -1215,7 +1330,7 @@
 
                         if (street.dotsClaimedCount === 5) {
                             claimStreet(street);
-                            currentActiveStreet = null; 
+                            currentActiveStreet = null;
                             document.getElementById('active-street-banner').style.display = 'none';
                         }
                     }
@@ -1245,9 +1360,16 @@
             document.getElementById('dots-eaten-text').innerText = `${eatenCount}/5`;
         }
 
-        function claimStreet(street) {
+        /* Claiming (or stealing) a street writes to SHARED storage,
+           so it stays claimed forever and every runner on the
+           platform who passes that street sees who owns it — until
+           somebody else sweeps all 5 dots and takes it over. */
+        async function claimStreet(street) {
+            const wasStolen = street.claimed && street.claimedBy !== `${currentUser.firstName} ${currentUser.lastName}`;
+
             street.claimed = true;
-            
+            street.claimedBy = `${currentUser.firstName} ${currentUser.lastName}`;
+
             street.polyline.setStyle({
                 color: 'var(--neon-green)',
                 weight: 12,
@@ -1255,55 +1377,37 @@
             });
 
             street.labelTooltip.getElement().classList.add('claimed');
-            street.labelTooltip.setContent(`Claimed by ${currentUser.firstName} (${Math.round(street.distanceMeters)}m)`);
+            street.labelTooltip.getElement().style.borderColor = '';
+            street.labelTooltip.getElement().style.color = '';
+            street.labelTooltip.setContent(`Claimed by ${street.claimedBy} (${Math.round(street.distanceMeters)}m)`);
 
+            if (street.claimMarker) {
+                map.removeLayer(street.claimMarker);
+            }
             const claimedIcon = L.divIcon({
                 className: 'custom-avatar-marker',
                 html: `<div class="avatar-claimed-floating">${currentUser.firstName[0].toUpperCase()}</div>`,
                 iconSize: [26, 26]
             });
-            L.marker(street.midPoint, {icon: claimedIcon}).addTo(map);
+            street.claimMarker = L.marker(street.midPoint, {icon: claimedIcon}).addTo(map);
 
             claimedStreetsInCurrentRun++;
             document.getElementById('stat-streets').innerText = claimedStreetsInCurrentRun;
 
-            currentUser.xp += 150; 
+            currentUser.xp += 150;
             document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
-            
-            simulateBotActivity();
-        }
 
-        function simulateBotActivity() {
-            const unclaimed = activeStreets.filter(s => !s.claimed);
-            if (unclaimed.length > 0) {
-                const randomStreet = unclaimed[Math.floor(Math.random() * unclaimed.length)];
-                const botNames = ["SpeedRunnerX", "SweeperSally", "GhostWalker"];
-                const botColors = ['#fc5200', '#ff007f', '#8a2be2'];
-                const botIndex = Math.floor(Math.random() * botNames.length);
-
-                randomStreet.claimed = true;
-                randomStreet.polyline.setStyle({
-                    color: botColors[botIndex],
-                    weight: 12,
-                    opacity: 0.85
-                });
-
-                randomStreet.labelTooltip.getElement().classList.add('claimed');
-                randomStreet.labelTooltip.getElement().style.borderColor = botColors[botIndex];
-                randomStreet.labelTooltip.getElement().style.color = botColors[botIndex];
-                randomStreet.labelTooltip.setContent(`Claimed by ${botNames[botIndex]} (${Math.round(randomStreet.distanceMeters)}m)`);
-
-                const botIcon = L.divIcon({
-                    className: 'custom-avatar-marker',
-                    html: `<div class="avatar-claimed-floating" style="background: ${botColors[botIndex]};">${botNames[botIndex][0]}</div>`,
-                    iconSize: [26, 26]
-                });
-                L.marker(randomStreet.midPoint, {icon: botIcon}).addTo(map);
-            }
+            // Persist the claim permanently for every user on the platform.
+            await storageSetSafe(street.streetKey, JSON.stringify({
+                claimedBy: street.claimedBy,
+                streetName: street.name,
+                claimedAt: new Date().toISOString(),
+                stolenFromPrevious: wasStolen
+            }), true);
         }
 
         function getDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; 
+            const R = 6371e3;
             const phi1 = lat1 * Math.PI/180;
             const phi2 = lat2 * Math.PI/180;
             const deltaPhi = (lat2-lat1) * Math.PI/180;
@@ -1346,12 +1450,13 @@
             }
         }
 
-        function triggerSave() {
+        async function triggerSave() {
             clearInterval(timerInterval);
 
             currentUser.streetsClaimed += claimedStreetsInCurrentRun;
-            localStorage.setItem(`user_${currentUser.email}`, JSON.stringify(currentUser));
-            localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+            const userKey = `dotrunner_account_${currentUser.email.toLowerCase()}`;
+            await storageSetSafe(userKey, JSON.stringify(currentUser), false);
+            await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
 
             document.getElementById('sum-time').innerText = document.getElementById('stat-time').innerText;
             document.getElementById('sum-distance').innerText = `${totalDistanceRun.toFixed(2)} km`;
@@ -1400,7 +1505,7 @@
             lastLat = null;
             lastLng = null;
             runCoordsPath = [];
-            
+
             if (liveRouteLine) {
                 map.removeLayer(liveRouteLine);
                 liveRouteLine = null;
@@ -1413,7 +1518,7 @@
             document.getElementById('btn-run').innerText = "Start Run";
             document.getElementById('btn-run').classList.remove('btn-pause');
             document.getElementById('btn-save').classList.add('hidden');
-            
+
             updateDotsIndicator(0);
             updateWeeklyProgress();
             updateLeaderboard();
@@ -1457,7 +1562,7 @@
                 const isUser = player.email === currentUser.email;
                 const row = document.createElement('div');
                 row.className = `leader-row ${isUser ? 'user-row' : ''}`;
-                
+
                 row.innerHTML = `
                     <span class="leader-rank">#${index + 1}</span>
                     <span class="leader-name">${player.firstName} ${player.lastName}</span>
