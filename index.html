@@ -35,6 +35,12 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overscroll-behavior: none;
         }
 
         .screen {
@@ -915,6 +921,19 @@
            platform sees the same claimed streets forever, until
            somebody else runs that street and steals it. */
 
+        /* Forces the viewport back to the top. Mobile browsers can drift
+           the page down (address bar collapse, keyboard closing, etc.),
+           so this runs on every screen change to guarantee you always
+           start looking at the top of the new screen. */
+        function forceScrollTop() {
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+        }
+
+        window.addEventListener('resize', forceScrollTop);
+        window.addEventListener('orientationchange', forceScrollTop);
+
         async function storageGetSafe(key, shared) {
             try {
                 const result = await window.storage.get(key, shared);
@@ -1021,6 +1040,7 @@
         function goToGame() {
             document.getElementById('landing-screen').classList.add('hidden');
             document.getElementById('game-screen').classList.remove('hidden');
+            forceScrollTop();
 
             document.getElementById('nav-avatar').innerText = currentUser.firstName[0].toUpperCase();
             document.getElementById('nav-name').innerText = `${currentUser.firstName} ${currentUser.lastName}`;
@@ -1049,6 +1069,7 @@
             if (locationStarted) return;
             locationStarted = true;
             document.getElementById('location-gate').classList.add('hidden');
+            forceScrollTop();
 
             if (navigator.geolocation) {
                 watchId = navigator.geolocation.watchPosition(onLocationSuccess, onLocationError, {
@@ -1092,6 +1113,7 @@
 
         function onLocationSuccess(position) {
             document.getElementById('gps-warning').style.display = 'none';
+            forceScrollTop();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             const rawSpeed = position.coords.speed;
