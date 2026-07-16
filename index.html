@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DotRunner: Street Sweep Run</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300;0,700;1,900&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-dark: #121214;
+            --card-dark: #1a1a1e;
+            --neon-blue: #00d2ff;
+            --neon-purple: #8a2be2;
+            --neon-green: #39ff14;
+            --neon-gold: #ffd700;
+            --neon-pink: #ff007f;
+            --text-light: #f5f5f7;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Montserrat', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body, html {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            z-index: 10;
+        }
+
+        .screen.hidden {
+            opacity: 0;
+            transform: scale(0.95);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* --- LANDING PAGE --- */
+        #landing-screen {
+            background: linear-gradient(135deg, rgba(18, 18, 20, 0.92) 0%, rgba(26, 26, 30, 0.98) 100%), 
+                        url('https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1200&q=80') center/cover no-repeat;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .hero-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .hero-logo {
+            font-size: 3rem;
+            font-weight: 900;
+            font-style: italic;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            color: var(--text-light);
+            text-shadow: 0 0 15px rgba(255, 0, 127, 0.6);
+            line-height: 0.95;
+        }
+
+        .hero-logo span {
+            color: var(--neon-pink);
+        }
+
+        .hero-tagline {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: var(--neon-blue);
+            margin-top: 0.6rem;
+        }
+
+        .auth-container {
+            background: rgba(26, 26, 30, 0.95);
+            border: 2px solid var(--neon-pink);
+            box-shadow: 0 8px 32px rgba(255, 0, 127, 0.2);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 400px;
+            padding: 2rem;
+        }
+
+        .auth-title {
+            font-size: 1.4rem;
+            font-weight: 900;
+            font-style: italic;
+            text-transform: uppercase;
+            color: var(--text-light);
+            margin-bottom: 1.5rem;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .input-group {
+            margin-bottom: 1.2rem;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 0.4rem;
+            color: #a0a5c0;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: rgba(18, 18, 20, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 0.9rem;
+            color: var(--text-light);
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .input-group input:focus {
+            border-color: var(--neon-pink);
+            box-shadow: 0 0 10px rgba(255, 0, 127, 0.25);
+        }
+
+        .btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--neon-pink), var(--neon-purple));
+            color: #ffffff;
+            border: none;
+            border-radius: 10px;
+            padding: 1.1rem;
+            font-size: 0.95rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 15px rgba(255, 0, 127, 0.4);
+        }
+
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .auth-switch {
+            font-size: 0.8rem;
+            text-align: center;
+            margin-top: 1.2rem;
+            color: #a0a5c0;
+        }
+
+        .auth-switch span {
+            color: var(--neon-blue);
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        /* --- GAME SCREEN --- */
+        #game-screen {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .top-nav {
+            height: 65px;
+            background: var(--card-dark);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.2rem;
+            z-index: 100;
+        }
+
+        .user-badge {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-avatar {
+            width: 38px;
+            height: 38px;
+            background: var(--bg-dark);
+            border: 2px solid var(--neon-blue);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            color: var(--neon-blue);
+            box-shadow: 0 0 8px var(--neon-blue);
+        }
+
+        .user-info-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
+            font-size: 0.85rem;
+            font-weight: 900;
+        }
+
+        .user-xp {
+            font-size: 0.7rem;
+            color: var(--neon-pink);
+            font-weight: 700;
+        }
+
+        #gps-warning {
+            position: absolute;
+            top: 75px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(255, 0, 127, 0.95);
+            color: white;
+            border-radius: 12px;
+            padding: 1rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            z-index: 999;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            display: none;
+            text-align: center;
+        }
+
+        #speed-cheat-warning {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            max-width: 380px;
+            background: rgba(18, 18, 20, 0.95);
+            border: 3px solid var(--neon-pink);
+            color: white;
+            border-radius: 16px;
+            padding: 2rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 700;
+            z-index: 1001;
+            box-shadow: 0 0 30px rgba(255, 0, 127, 0.6);
+            display: none;
+            text-align: center;
+        }
+
+        #speed-cheat-warning h3 {
+            color: var(--neon-pink);
+            margin-bottom: 1rem;
+            font-style: italic;
+        }
+
+        #map {
+            flex-grow: 1;
+            width: 100%;
+            z-index: 5;
+        }
+
+        /* Active Street Top Banner */
+        #active-street-banner {
+            position: absolute;
+            top: 75px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(26, 26, 30, 0.9);
+            border: 1px solid var(--neon-blue);
+            color: white;
+            border-radius: 10px;
+            padding: 0.8rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            z-index: 900;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #street-dots-count {
+            color: var(--neon-gold);
+            font-weight: 900;
+            text-shadow: 0 0 5px var(--neon-gold);
+        }
+
+        /* Dashboard */
+        .dashboard {
+            background: var(--card-dark);
+            border-top: 2px solid var(--neon-pink);
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            z-index: 100;
+        }
+
+        /* Active Run Glow Animation */
+        .dashboard.active-run {
+            animation: dash-glow 2s infinite alternate;
+        }
+
+        @keyframes dash-glow {
+            from { border-top-color: var(--neon-pink); box-shadow: 0 -4px 10px rgba(255,0,127,0.2); }
+            to { border-top-color: var(--neon-blue); box-shadow: 0 -4px 15px rgba(0,210,255,0.4); }
+        }
+
+        .dash-tabs {
+            display: flex;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: none;
+            border: none;
+            color: #a0a5c0;
+            font-weight: 700;
+            padding: 0.8rem 0;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            color: var(--neon-pink);
+            border-bottom: 2px solid var(--neon-pink);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .stat-card {
+            background: rgba(18, 18, 20, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 1rem;
+        }
+
+        .stat-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            color: #a0a5c0;
+            letter-spacing: 1.5px;
+            margin-bottom: 0.4rem;
+        }
+
+        .stat-value {
+            font-size: 1.6rem;
+            font-weight: 900;
+            font-style: italic;
+            color: var(--text-light);
+        }
+
+        .stat-value.cyan {
+            color: var(--neon-blue);
+        }
+
+        .stat-value.pink {
+            color: var(--neon-pink);
+        }
+
+        .dots-eaten-indicator {
+            font-size: 0.75rem;
+            color: #a0a5c0;
+            margin-top: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot-circle {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            display: inline-block;
+        }
+
+        .dot-circle.active {
+            background: var(--neon-gold);
+            box-shadow: 0 0 8px var(--neon-gold);
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 0.6rem;
+        }
+
+        .btn-pause {
+            background: var(--neon-pink);
+            box-shadow: 0 4px 15px rgba(255, 0, 127, 0.4);
+        }
+
+        .btn-sec {
+            background: rgba(0, 210, 255, 0.1);
+            border: 1px solid var(--neon-blue);
+            color: var(--neon-blue);
+            box-shadow: none;
+        }
+
+        /* Leaderboard */
+        .leaderboard-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .leader-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(18, 18, 20, 0.6);
+            padding: 0.7rem 1rem;
+            border-radius: 8px;
+            border-left: 3px solid transparent;
+        }
+
+        .leader-row.user-row {
+            border-left-color: var(--neon-blue);
+            background: rgba(0, 210, 255, 0.08);
+        }
+
+        .leader-rank {
+            font-weight: 900;
+            color: var(--neon-blue);
+            width: 25px;
+        }
+
+        .leader-name {
+            flex-grow: 1;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+
+        .leader-score {
+            font-weight: 900;
+            color: var(--neon-gold);
+        }
+
+        /* Spinner for Leaderboard */
+        .pulse-loader {
+            text-align: center;
+            color: var(--neon-pink);
+            font-weight: 700;
+            font-style: italic;
+            padding: 1.5rem;
+            animation: pulse-text 1.5s infinite alternate;
+        }
+
+        @keyframes pulse-text {
+            from { opacity: 0.5; transform: scale(0.98); }
+            to { opacity: 1; transform: scale(1.02); }
+        }
+
+        /* --- SUMMARY OVERLAY --- */
+        #summary-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(18, 18, 20, 0.98);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem 1.5rem;
+            overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.1, 0.76, 0.55, 0.94);
+        }
+
+        #summary-overlay.active {
+            transform: translateY(0);
+        }
+
+        .summary-header {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .summary-title {
+            font-size: 2.2rem;
+            font-weight: 900;
+            font-style: italic;
+            text-transform: uppercase;
+            color: var(--neon-pink);
+            text-shadow: 0 0 15px rgba(255, 0, 127, 0.4);
+        }
+
+        .summary-subtitle {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            color: var(--neon-blue);
+        }
+
+        #summary-map {
+            width: 100%;
+            height: 220px;
+            border-radius: 16px;
+            border: 2px solid var(--neon-pink);
+            margin-bottom: 1.5rem;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .summary-card {
+            background: var(--card-dark);
+            border: 1px solid rgba(255,255,255,0.03);
+            border-radius: 12px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .summary-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            color: #a0a5c0;
+            letter-spacing: 1px;
+            margin-bottom: 0.2rem;
+        }
+
+        .summary-value {
+            font-size: 1.5rem;
+            font-weight: 900;
+            font-style: italic;
+        }
+
+        .summary-value.blue { color: var(--neon-blue); }
+        .summary-value.pink { color: var(--neon-pink); }
+        .summary-value.gold { color: var(--neon-gold); }
+
+        /* Custom Leaflet Map Labels & DivIcons */
+        .custom-avatar-marker {
+            background: none;
+            border: none;
+        }
+        
+        .avatar-glow {
+            width: 32px;
+            height: 32px;
+            background: var(--neon-blue);
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 15px var(--neon-blue), 0 0 5px #fff;
+            color: #000;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            animation: pulse-marker 2s infinite;
+        }
+
+        .avatar-claimed-floating {
+            width: 26px;
+            height: 26px;
+            background: var(--neon-green);
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--neon-green);
+            color: #000;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+
+        /* Custom styling for floating street label popups */
+        .street-label-tooltip {
+            background: rgba(26, 26, 30, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+        }
+
+        .street-label-tooltip.claimed {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            font-weight: 900;
+            font-size: 10px;
+        }
+
+        @keyframes pulse-marker {
+            0% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0.7); }
+            70% { box-shadow: 0 0 0 12px rgba(0, 210, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0); }
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(26, 26, 30, 0.95);
+            padding: 1rem 2rem;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--neon-blue);
+            border: 1px solid var(--neon-blue);
+            z-index: 99;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- --- 1. LANDING SCREEN --- -->
+    <div id="landing-screen" class="screen">
+        <div class="hero-header">
+            <h1 class="hero-logo">DotRunner</h1>
+            <p class="hero-tagline">Street Sweep Run</p>
+        </div>
+
+        <div class="auth-container">
+            <h2 class="auth-title" id="form-title">Become a Member</h2>
+            
+            <form id="auth-form" onsubmit="handleAuth(event)">
+                <div class="input-group" id="name-group">
+                    <label>First Name</label>
+                    <input type="text" id="first-name" required placeholder="e.g. Dan">
+                </div>
+                <div class="input-group" id="last-group">
+                    <label>Last Name</label>
+                    <input type="text" id="last-name" required placeholder="e.g. Peters">
+                </div>
+                <div class="input-group">
+                    <label>Email Address</label>
+                    <input type="email" id="email" required placeholder="name@example.com">
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required placeholder="••••••••">
+                </div>
+
+                <button type="submit" class="btn" id="submit-btn">Register</button>
+            </form>
+
+            <p class="auth-switch" id="auth-switch-text">
+                Already a member? <span onclick="toggleAuthMode()">Sign In</span>
+            </p>
+        </div>
+    </div>
+
+    <!-- --- 2. GAME SCREEN --- -->
+    <div id="game-screen" class="screen hidden">
+        <nav class="top-nav">
+            <div class="user-badge">
+                <div class="user-avatar" id="nav-avatar">U</div>
+                <div class="user-info-text">
+                    <span class="user-name" id="nav-name">Runner</span>
+                    <span class="user-xp" id="nav-xp">0 XP</span>
+                </div>
+            </div>
+            <div class="hero-tagline" style="font-size: 0.75rem; margin: 0; color: var(--neon-pink);">STREET SWEEP</div>
+        </nav>
+
+        <div id="gps-warning">
+            GPS is required to track your run. Please click 'Allow' in your browser pop-up or enable location services in your phone's settings.
+        </div>
+
+        <div id="speed-cheat-warning">
+            <h3>⚠️ SPEED LIMIT EXCEEDED!</h3>
+            <p>Are you driving or biking? Please slow down to run/walk. Tracking has been paused temporarily.</p>
+        </div>
+
+        <!-- Active Street Tracker Banner -->
+        <div id="active-street-banner" style="display: none;">
+            <span id="active-street-name">Wachtend op straat...</span>
+            <span id="street-dots-count">0/5 dots</span>
+        </div>
+
+        <!-- Map container -->
+        <div id="map"></div>
+        <div id="loading-streets" class="loading-overlay">Loading streets from OSM...</div>
+
+        <!-- Dashboard -->
+        <div class="dashboard" id="dash-panel">
+            <div class="dash-tabs">
+                <button class="tab-btn active" onclick="switchTab('stats')">Stats</button>
+                <button class="tab-btn" onclick="switchTab('weekly')">Weekly</button>
+                <button class="tab-btn" onclick="switchTab('leaders')">Leaders</button>
+            </div>
+
+            <!-- Stats Tab -->
+            <div id="tab-stats" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <p class="stat-label">Time</p>
+                        <p class="stat-value" id="stat-time">00:00:00</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-label">Distance</p>
+                        <p class="stat-value cyan" id="stat-distance">0.00 <span style="font-size: 0.8rem;">km</span></p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-label">Pace</p>
+                        <p class="stat-value pink" id="stat-pace">--/km</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="stat-label">Streets Claimed</p>
+                        <p class="stat-value" id="stat-streets">0</p>
+                    </div>
+                </div>
+
+                <!-- Dots progress milestone -->
+                <div class="dots-eaten-indicator">
+                    <span>Active dots:</span>
+                    <span id="dot-circles-container">
+                        <span class="dot-circle"></span>
+                        <span class="dot-circle"></span>
+                        <span class="dot-circle"></span>
+                        <span class="dot-circle"></span>
+                        <span class="dot-circle"></span>
+                    </span>
+                    <span id="dots-eaten-text" style="font-weight: 700; margin-left: 5px;">0/5</span>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn" id="btn-run" onclick="toggleRun()">Start Run</button>
+                    <button class="btn btn-sec hidden" id="btn-save" onclick="triggerSave()">Save Run</button>
+                </div>
+            </div>
+
+            <!-- Weekly Tab -->
+            <div id="tab-weekly" class="tab-content">
+                <p class="stat-label" style="margin-bottom: 0.5rem;">Weekly Goals</p>
+                <p style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;" id="weekly-info">0 / 10 Streets Claimed</p>
+                <div style="background: rgba(255,255,255,0.05); border-radius: 10px; height: 12px; width: 100%; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, var(--neon-blue), var(--neon-pink)); height: 100%; width: 0%;" id="weekly-bar"></div>
+                </div>
+                <p style="font-size: 0.75rem; color: #a0a5c0; margin-top: 1rem; text-align: center;">🔥 Active run streak is alive! 🏃‍♂️</p>
+            </div>
+
+            <!-- Leaders Tab -->
+            <div id="tab-leaders" class="tab-content">
+                <div class="leaderboard-list" id="leaderboard">
+                    <div class="pulse-loader">Loading global ranking...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- --- 3. SUMMARY OVERLAY --- -->
+    <div id="summary-overlay">
+        <div class="summary-header">
+            <h2 class="summary-title">Run Completed!</h2>
+            <p class="summary-subtitle">Street Sweep Activity Overview</p>
+        </div>
+
+        <div id="summary-map"></div>
+
+        <div class="summary-grid">
+            <div class="summary-card">
+                <p class="summary-label">Duration</p>
+                <p class="summary-value" id="sum-time">00:00:00</p>
+            </div>
+            <div class="summary-card">
+                <p class="summary-label">Distance</p>
+                <p class="summary-value blue" id="sum-distance">0.00 km</p>
+            </div>
+            <div class="summary-card">
+                <p class="summary-label">Dots Swept</p>
+                <p class="summary-value gold" id="sum-dots">0</p>
+            </div>
+            <div class="summary-card">
+                <p class="summary-label">Streets Claimed</p>
+                <p class="summary-value pink" id="sum-streets">0</p>
+            </div>
+            <div class="summary-card" style="grid-column: span 2;">
+                <p class="summary-label">Total XP Earned</p>
+                <p class="summary-value blue" id="sum-xp" style="font-size: 1.8rem;">+0 XP</p>
+            </div>
+        </div>
+
+        <button class="btn" onclick="closeSummary()">Close & Save Run</button>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        let currentUser = null;
+        let isLoginMode = false;
+        let map = null;
+        let summaryMap = null;
+        let userMarker = null;
+        let watchId = null;
+        let runActive = false;
+        
+        let secondsElapsed = 0;
+        let timerInterval = null;
+        let claimedStreetsInCurrentRun = 0;
+        let collectedDotsInCurrentRun = 0;
+        let totalDistanceRun = 0.0;
+        let lastLat = null;
+        let lastLng = null;
+        let runCoordsPath = []; 
+        let liveRouteLine = null;
+        
+        let audioCtx = null;
+        let activeStreets = [];
+        let currentActiveStreet = null; 
+
+        let speedLimitViolationTimer = 0;
+        let speedViolationActive = false;
+
+        window.onload = function() {
+            const savedUser = localStorage.getItem('dotrunner_user');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                goToGame();
+            }
+        };
+
+        function toggleAuthMode() {
+            isLoginMode = !isLoginMode;
+            const title = document.getElementById('form-title');
+            const submitBtn = document.getElementById('submit-btn');
+            const switchText = document.getElementById('auth-switch-text');
+            const nameGroup = document.getElementById('name-group');
+            const lastGroup = document.getElementById('last-group');
+
+            if (isLoginMode) {
+                title.innerText = "Sign In";
+                submitBtn.innerText = "Sign In";
+                switchText.innerHTML = "Become a member? <span onclick='toggleAuthMode()'>Register Now</span>";
+                nameGroup.style.display = 'none';
+                lastGroup.style.display = 'none';
+                document.getElementById('first-name').required = false;
+                document.getElementById('last-name').required = false;
+            } else {
+                title.innerText = "Become a Member";
+                submitBtn.innerText = "Register";
+                switchText.innerHTML = "Already a member? <span onclick='toggleAuthMode()'>Sign In</span>";
+                nameGroup.style.display = 'block';
+                lastGroup.style.display = 'block';
+                document.getElementById('first-name').required = true;
+                document.getElementById('last-name').required = true;
+            }
+        }
+
+        function handleAuth(event) {
+            event.preventDefault();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (isLoginMode) {
+                const storedUser = localStorage.getItem(`user_${email}`);
+                if (storedUser) {
+                    const parsed = JSON.parse(storedUser);
+                    if (parsed.password === password) {
+                        currentUser = parsed;
+                        localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+                        goToGame();
+                    } else {
+                        alert("Invalid password!");
+                    }
+                } else {
+                    alert("Account does not exist. Please register!");
+                }
+            } else {
+                const firstName = document.getElementById('first-name').value.trim();
+                const lastName = document.getElementById('last-name').value.trim();
+                
+                currentUser = {
+                    firstName,
+                    lastName,
+                    email,
+                    password,
+                    xp: 0,
+                    streetsClaimed: 0
+                };
+
+                localStorage.setItem(`user_${email}`, JSON.stringify(currentUser));
+                localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+                goToGame();
+            }
+        }
+
+        function goToGame() {
+            document.getElementById('landing-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            
+            document.getElementById('nav-avatar').innerText = currentUser.firstName[0].toUpperCase();
+            document.getElementById('nav-name').innerText = `${currentUser.firstName} ${currentUser.lastName}`;
+            document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
+
+            initMap();
+            initAudio();
+            updateLeaderboard();
+        }
+
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([52.0907, 5.1214], 16);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png', {
+                maxZoom: 20
+            }).addTo(map);
+
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(onLocationSuccess, onLocationError, {
+                    enableHighAccuracy: true,
+                    maximumAge: 1000,
+                    timeout: 10000
+                });
+            } else {
+                document.getElementById('gps-warning').style.display = 'block';
+            }
+        }
+
+        function initAudio() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                audioCtx = new AudioContext();
+            }
+        }
+
+        function playEatSound() {
+            if (!audioCtx) return;
+            try {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
+                osc.frequency.setValueAtTime(880.00, audioCtx.currentTime + 0.08); 
+                
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            } catch (e) {
+                console.warn("Audio Context blocked by browser policy.");
+            }
+        }
+
+        function onLocationSuccess(position) {
+            document.getElementById('gps-warning').style.display = 'none';
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const rawSpeed = position.coords.speed; 
+
+            map.setView([lat, lng], 17);
+
+            if (rawSpeed !== null && rawSpeed !== undefined) {
+                const speedKmh = rawSpeed * 3.6;
+                if (speedKmh > 20) {
+                    speedLimitViolationTimer += 1;
+                    if (speedLimitViolationTimer >= 5) {
+                        triggerSpeedLimitCheating(true);
+                    }
+                } else {
+                    speedLimitViolationTimer = 0;
+                    if (speedViolationActive) {
+                        triggerSpeedLimitCheating(false);
+                    }
+                }
+            }
+
+            if (!userMarker) {
+                const customIcon = L.divIcon({
+                    className: 'custom-avatar-marker',
+                    html: `<div class="avatar-glow">${currentUser.firstName[0].toUpperCase()}</div>`,
+                    iconSize: [32, 32]
+                });
+                userMarker = L.marker([lat, lng], {icon: customIcon}).addTo(map);
+                
+                fetchRealStreets(lat, lng);
+            } else {
+                userMarker.setLatLng([lat, lng]);
+            }
+
+            if (runActive && !speedViolationActive) {
+                runCoordsPath.push([lat, lng]);
+
+                if (!liveRouteLine) {
+                    liveRouteLine = L.polyline(runCoordsPath, {
+                        color: 'var(--neon-blue)',
+                        weight: 5,
+                        opacity: 0.9,
+                        lineCap: 'round'
+                    }).addTo(map);
+                } else {
+                    liveRouteLine.setLatLngs(runCoordsPath);
+                }
+
+                if (lastLat !== null && lastLng !== null) {
+                    const distStep = getDistance(lastLat, lastLng, lat, lng) / 1000;
+                    if (distStep > 0.001) { 
+                        totalDistanceRun += distStep;
+                        document.getElementById('stat-distance').innerHTML = `${totalDistanceRun.toFixed(2)} <span style="font-size: 0.8rem;">km</span>`;
+                        
+                        if (totalDistanceRun > 0) {
+                            const min = (secondsElapsed / 60) / totalDistanceRun;
+                            const paceMin = Math.floor(min);
+                            const paceSec = Math.floor((min - paceMin) * 60);
+                            document.getElementById('stat-pace').innerText = `${paceMin}:${String(paceSec).padStart(2, '0')}/km`;
+                        }
+                    }
+                }
+                lastLat = lat;
+                lastLng = lng;
+
+                checkDotCollisions(lat, lng);
+            }
+        }
+
+        function onLocationError(error) {
+            document.getElementById('gps-warning').style.display = 'block';
+            console.warn('GPS Error: ', error);
+        }
+
+        function triggerSpeedLimitCheating(isActive) {
+            speedViolationActive = isActive;
+            const warningEl = document.getElementById('speed-cheat-warning');
+            if (isActive) {
+                warningEl.style.display = 'block';
+                if (runActive) {
+                    toggleRun(true);
+                }
+            } else {
+                warningEl.style.display = 'none';
+            }
+        }
+
+        async function fetchRealStreets(lat, lng) {
+            document.getElementById('loading-streets').style.display = 'block';
+            
+            const radius = 400; 
+            const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|service|construction|platform|steps|path|cycleway"];out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+            const borderColors = ['#ff007f', '#00d2ff', '#8a2be2', '#fc5200', '#ffd700'];
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                activeStreets.forEach(s => {
+                    map.removeLayer(s.polyline);
+                    if (s.labelTooltip) map.removeLayer(s.labelTooltip);
+                    s.dots.forEach(d => { if(d.marker) map.removeLayer(d.marker); });
+                });
+                activeStreets = [];
+
+                if (data.elements) {
+                    data.elements.forEach((element, idx) => {
+                        if (element.geometry && element.geometry.length > 1) {
+                            const coords = element.geometry.map(pt => [pt.lat, pt.lon]);
+                            const streetName = element.tags.name || "Unnamed Path";
+                            
+                            let streetDistanceMeters = 0;
+                            for (let i = 0; i < coords.length - 1; i++) {
+                                streetDistanceMeters += getDistance(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]);
+                            }
+
+                            const uniqueColor = borderColors[idx % borderColors.length];
+
+                            const polyline = L.polyline(coords, {
+                                color: uniqueColor,
+                                opacity: 0.45,
+                                weight: 10, 
+                                lineCap: 'round'
+                            }).addTo(map);
+
+                            const midPointIndex = Math.floor(coords.length / 2);
+                            const midPoint = coords[midPointIndex];
+
+                            const labelTooltip = L.tooltip({
+                                permanent: true,
+                                direction: 'center',
+                                className: 'street-label-tooltip'
+                            })
+                            .setContent(`${streetName} (${Math.round(streetDistanceMeters)}m)`)
+                            .setLatLng(midPoint)
+                            .addTo(map);
+
+                            let dots = [];
+                            const segmentStep = Math.max(1, Math.floor((coords.length - 1) / 4));
+                            for (let i = 0; i < 5; i++) {
+                                let targetIdx = Math.min(coords.length - 1, i * segmentStep);
+                                const dotLat = coords[targetIdx][0];
+                                const dotLng = coords[targetIdx][1];
+
+                                const dotMarker = L.circleMarker([dotLat, dotLng], {
+                                    radius: 5,
+                                    color: '#ffd700',
+                                    fillColor: '#ffd700',
+                                    fillOpacity: 1,
+                                    interactive: false
+                                }).addTo(map);
+
+                                dots.push({
+                                    lat: dotLat,
+                                    lng: dotLng,
+                                    marker: dotMarker,
+                                    eaten: false
+                                });
+                            }
+
+                            activeStreets.push({
+                                id: element.id,
+                                name: streetName,
+                                distanceMeters: streetDistanceMeters,
+                                polyline: polyline,
+                                labelTooltip: labelTooltip,
+                                dots: dots,
+                                claimed: false,
+                                uniqueColor: uniqueColor,
+                                midPoint: midPoint,
+                                dotsClaimedCount: 0
+                            });
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching streets: ", error);
+            } finally {
+                document.getElementById('loading-streets').style.display = 'none';
+            }
+        }
+
+        function checkDotCollisions(playerLat, playerLng) {
+            activeStreets.forEach(street => {
+                if (street.claimed) return;
+
+                street.dots.forEach(dot => {
+                    if (dot.eaten) return;
+
+                    let dist = getDistance(playerLat, playerLng, dot.lat, dot.lng);
+                    if (dist <= 15) { 
+                        
+                        if (currentActiveStreet !== null && currentActiveStreet.id !== street.id) {
+                            resetActiveStreetProgress(currentActiveStreet);
+                        }
+
+                        currentActiveStreet = street;
+                        dot.eaten = true;
+                        map.removeLayer(dot.marker);
+                        playEatSound();
+
+                        street.dotsClaimedCount++;
+                        collectedDotsInCurrentRun++;
+
+                        document.getElementById('active-street-banner').style.display = 'flex';
+                        document.getElementById('active-street-name').innerText = `${street.name}`;
+                        document.getElementById('street-dots-count').innerText = `${street.dotsClaimedCount}/5 dots`;
+
+                        updateDotsIndicator(street.dotsClaimedCount);
+
+                        currentUser.xp += 10;
+                        document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
+
+                        if (street.dotsClaimedCount === 5) {
+                            claimStreet(street);
+                            currentActiveStreet = null; 
+                            document.getElementById('active-street-banner').style.display = 'none';
+                        }
+                    }
+                });
+            });
+        }
+
+        function resetActiveStreetProgress(street) {
+            street.dotsClaimedCount = 0;
+            street.dots.forEach(dot => {
+                dot.eaten = false;
+                if (!map.hasLayer(dot.marker)) {
+                    dot.marker.addTo(map);
+                }
+            });
+        }
+
+        function updateDotsIndicator(eatenCount) {
+            const circles = document.querySelectorAll('.dot-circle');
+            circles.forEach((circle, index) => {
+                if (index < eatenCount) {
+                    circle.classList.add('active');
+                } else {
+                    circle.classList.remove('active');
+                }
+            });
+            document.getElementById('dots-eaten-text').innerText = `${eatenCount}/5`;
+        }
+
+        function claimStreet(street) {
+            street.claimed = true;
+            
+            street.polyline.setStyle({
+                color: 'var(--neon-green)',
+                weight: 12,
+                opacity: 0.95
+            });
+
+            street.labelTooltip.getElement().classList.add('claimed');
+            street.labelTooltip.setContent(`Claimed by ${currentUser.firstName} (${Math.round(street.distanceMeters)}m)`);
+
+            const claimedIcon = L.divIcon({
+                className: 'custom-avatar-marker',
+                html: `<div class="avatar-claimed-floating">${currentUser.firstName[0].toUpperCase()}</div>`,
+                iconSize: [26, 26]
+            });
+            L.marker(street.midPoint, {icon: claimedIcon}).addTo(map);
+
+            claimedStreetsInCurrentRun++;
+            document.getElementById('stat-streets').innerText = claimedStreetsInCurrentRun;
+
+            currentUser.xp += 150; 
+            document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
+            
+            simulateBotActivity();
+        }
+
+        function simulateBotActivity() {
+            const unclaimed = activeStreets.filter(s => !s.claimed);
+            if (unclaimed.length > 0) {
+                const randomStreet = unclaimed[Math.floor(Math.random() * unclaimed.length)];
+                const botNames = ["SpeedRunnerX", "SweeperSally", "GhostWalker"];
+                const botColors = ['#fc5200', '#ff007f', '#8a2be2'];
+                const botIndex = Math.floor(Math.random() * botNames.length);
+
+                randomStreet.claimed = true;
+                randomStreet.polyline.setStyle({
+                    color: botColors[botIndex],
+                    weight: 12,
+                    opacity: 0.85
+                });
+
+                randomStreet.labelTooltip.getElement().classList.add('claimed');
+                randomStreet.labelTooltip.getElement().style.borderColor = botColors[botIndex];
+                randomStreet.labelTooltip.getElement().style.color = botColors[botIndex];
+                randomStreet.labelTooltip.setContent(`Claimed by ${botNames[botIndex]} (${Math.round(randomStreet.distanceMeters)}m)`);
+
+                const botIcon = L.divIcon({
+                    className: 'custom-avatar-marker',
+                    html: `<div class="avatar-claimed-floating" style="background: ${botColors[botIndex]};">${botNames[botIndex][0]}</div>`,
+                    iconSize: [26, 26]
+                });
+                L.marker(randomStreet.midPoint, {icon: botIcon}).addTo(map);
+            }
+        }
+
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; 
+            const phi1 = lat1 * Math.PI/180;
+            const phi2 = lat2 * Math.PI/180;
+            const deltaPhi = (lat2-lat1) * Math.PI/180;
+            const deltaLambda = (lon2-lon1) * Math.PI/180;
+
+            const a = Math.sin(deltaPhi/2) * Math.sin(deltaPhi/2) +
+                      Math.cos(phi1) * Math.cos(phi2) *
+                      Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c;
+        }
+
+        function toggleRun(forcePause = false) {
+            const btn = document.getElementById('btn-run');
+            const saveBtn = document.getElementById('btn-save');
+            const panel = document.getElementById('dash-panel');
+
+            if (!runActive && !forcePause) {
+                runActive = true;
+                btn.innerText = "Pause Run";
+                btn.classList.add('btn-pause');
+                saveBtn.classList.add('hidden');
+                panel.classList.add('active-run');
+
+                timerInterval = setInterval(() => {
+                    secondsElapsed++;
+                    const h = String(Math.floor(secondsElapsed / 3600)).padStart(2, '0');
+                    const m = String(Math.floor((secondsElapsed % 3600) / 60)).padStart(2, '0');
+                    const s = String(secondsElapsed % 60).padStart(2, '0');
+                    document.getElementById('stat-time').innerText = `${h}:${m}:${s}`;
+                }, 1000);
+            } else {
+                runActive = false;
+                btn.classList.remove('btn-pause');
+                btn.innerText = "Resume Run";
+                saveBtn.classList.remove('hidden');
+                panel.classList.remove('active-run');
+                clearInterval(timerInterval);
+            }
+        }
+
+        function triggerSave() {
+            clearInterval(timerInterval);
+
+            currentUser.streetsClaimed += claimedStreetsInCurrentRun;
+            localStorage.setItem(`user_${currentUser.email}`, JSON.stringify(currentUser));
+            localStorage.setItem('dotrunner_user', JSON.stringify(currentUser));
+
+            document.getElementById('sum-time').innerText = document.getElementById('stat-time').innerText;
+            document.getElementById('sum-distance').innerText = `${totalDistanceRun.toFixed(2)} km`;
+            document.getElementById('sum-dots').innerText = collectedDotsInCurrentRun;
+            document.getElementById('sum-streets').innerText = claimedStreetsInCurrentRun;
+            document.getElementById('sum-xp').innerText = `+${(collectedDotsInCurrentRun * 10) + (claimedStreetsInCurrentRun * 150)} XP`;
+
+            const overlay = document.getElementById('summary-overlay');
+            overlay.classList.add('active');
+
+            setTimeout(() => {
+                if (!summaryMap) {
+                    summaryMap = L.map('summary-map', {
+                        zoomControl: false,
+                        attributionControl: false,
+                        dragging: false,
+                        scrollWheelZoom: false
+                    });
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png').addTo(summaryMap);
+                }
+
+                if (runCoordsPath.length > 0) {
+                    summaryMap.eachLayer(layer => {
+                        if (layer instanceof L.Polyline) summaryMap.removeLayer(layer);
+                    });
+
+                    const summaryLine = L.polyline(runCoordsPath, {
+                        color: 'var(--neon-blue)',
+                        weight: 6
+                    }).addTo(summaryMap);
+
+                    summaryMap.fitBounds(summaryLine.getBounds(), { padding: [30, 30] });
+                } else if (userMarker) {
+                    summaryMap.setView(userMarker.getLatLng(), 15);
+                }
+            }, 300);
+        }
+
+        function closeSummary() {
+            document.getElementById('summary-overlay').classList.remove('active');
+
+            secondsElapsed = 0;
+            claimedStreetsInCurrentRun = 0;
+            collectedDotsInCurrentRun = 0;
+            totalDistanceRun = 0.0;
+            lastLat = null;
+            lastLng = null;
+            runCoordsPath = [];
+            
+            if (liveRouteLine) {
+                map.removeLayer(liveRouteLine);
+                liveRouteLine = null;
+            }
+
+            document.getElementById('stat-time').innerText = "00:00:00";
+            document.getElementById('stat-distance').innerHTML = "0.00 <span style='font-size: 0.8rem;'>km</span>";
+            document.getElementById('stat-pace').innerText = "--/km";
+            document.getElementById('stat-streets').innerText = "0";
+            document.getElementById('btn-run').innerText = "Start Run";
+            document.getElementById('btn-run').classList.remove('btn-pause');
+            document.getElementById('btn-save').classList.add('hidden');
+            
+            updateDotsIndicator(0);
+            updateWeeklyProgress();
+            updateLeaderboard();
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+
+            if (tabName === 'weekly') {
+                updateWeeklyProgress();
+            } else if (tabName === 'leaders') {
+                updateLeaderboard();
+            }
+        }
+
+        function updateWeeklyProgress() {
+            const count = currentUser.streetsClaimed;
+            const percentage = Math.min((count / 10) * 100, 100);
+            document.getElementById('weekly-info').innerText = `${count} / 10 Streets Claimed`;
+            document.getElementById('weekly-bar').style.width = `${percentage}%`;
+        }
+
+        function updateLeaderboard() {
+            const leaderboardContainer = document.getElementById('leaderboard');
+            leaderboardContainer.innerHTML = '';
+
+            const competitors = [
+                { firstName: "StravaMaster", lastName: "⚡", streetsClaimed: 18, email: "c1@test.com" },
+                { firstName: "NeonSweep", lastName: "🌌", streetsClaimed: 12, email: "c2@test.com" },
+                { firstName: "GhostRunner", lastName: "👤", streetsClaimed: 5, email: "c3@test.com" }
+            ];
+
+            competitors.push(currentUser);
+            competitors.sort((a, b) => b.streetsClaimed - a.streetsClaimed);
+
+            competitors.forEach((player, index) => {
+                const isUser = player.email === currentUser.email;
+                const row = document.createElement('div');
+                row.className = `leader-row ${isUser ? 'user-row' : ''}`;
+                
+                row.innerHTML = `
+                    <span class="leader-rank">#${index + 1}</span>
+                    <span class="leader-name">${player.firstName} ${player.lastName}</span>
+                    <span class="leader-score">${player.streetsClaimed} claimed</span>
+                `;
+                leaderboardContainer.appendChild(row);
+            });
+        }
+    </script>
+</body>
+</html>
