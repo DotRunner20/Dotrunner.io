@@ -931,8 +931,8 @@
             document.body.scrollTop = 0;
         }
 
-        window.addEventListener('resize', forceScrollTop);
-        window.addEventListener('orientationchange', forceScrollTop);
+        window.addEventListener('resize', () => { forceScrollTop(); if (map) map.invalidateSize(); });
+        window.addEventListener('orientationchange', () => { forceScrollTop(); if (map) map.invalidateSize(); });
 
         async function storageGetSafe(key, shared) {
             try {
@@ -1055,14 +1055,37 @@
            watching GPS yet — that only happens once the user taps
            the location-gate button (merged from the short version). */
         function initMapShell() {
+            const loadingEl = document.getElementById('loading-streets');
+            loadingEl.innerText = 'Loading map...';
+            loadingEl.style.display = 'block';
+
             map = L.map('map', {
                 zoomControl: false,
                 attributionControl: false
             }).setView([52.0907, 5.1214], 16);
 
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png', {
+            const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png', {
                 maxZoom: 20
             }).addTo(map);
+
+            // Hide the "Loading map..." message as soon as tiles are in,
+            // but never let it hang around more than 2.5s either way —
+            // this guarantees it's always fast, even on a slow connection.
+            let mapLoadingDone = false;
+            const hideMapLoading = () => {
+                if (mapLoadingDone) return;
+                mapLoadingDone = true;
+                loadingEl.style.display = 'none';
+            };
+            tileLayer.on('load', hideMapLoading);
+            setTimeout(hideMapLoading, 2500);
+
+            // Leaflet can miscalculate the container size if the map is
+            // created while the screen is still mid CSS-transition (this
+            // is what caused the map to sometimes only render correctly
+            // the second time / second account). Force a size recheck
+            // once the screen has fully faded in.
+            setTimeout(() => { if (map) map.invalidateSize(); }, 400);
         }
 
         function startLocationTracking() {
@@ -1113,7 +1136,6 @@
 
         function onLocationSuccess(position) {
             document.getElementById('gps-warning').style.display = 'none';
-            forceScrollTop();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             const rawSpeed = position.coords.speed;
@@ -1142,6 +1164,7 @@
                     iconSize: [32, 32]
                 });
                 userMarker = L.marker([lat, lng], {icon: customIcon}).addTo(map);
+                forceScrollTop();
 
                 fetchRealStreets(lat, lng);
             } else {
@@ -1202,7 +1225,9 @@
         }
 
         async function fetchRealStreets(lat, lng) {
-            document.getElementById('loading-streets').style.display = 'block';
+            const loadingEl = document.getElementById('loading-streets');
+            loadingEl.innerText = 'Loading streets from OSM...';
+            loadingEl.style.display = 'block';
 
             const radius = 400;
             const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|service|construction|platform|steps|path|cycleway"];out geom;`;
@@ -1211,7 +1236,10 @@
             const borderColors = ['#ff007f', '#00d2ff', '#8a2be2', '#fc5200', '#ffd700'];
 
             try {
-                const response = await fetch(url);
+                const controller = new AbortController();
+                const abortTimer = setTimeout(() => controller.abort(), 8000);
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(abortTimer);
                 const data = await response.json();
 
                 activeStreets.forEach(s => {
@@ -1519,6 +1547,7 @@
 
         function closeSummary() {
             document.getElementById('summary-overlay').classList.remove('active');
+            forceScrollTop();
 
             secondsElapsed = 0;
             claimedStreetsInCurrentRun = 0;
@@ -1552,6 +1581,7 @@
 
             event.target.classList.add('active');
             document.getElementById(`tab-${tabName}`).classList.add('active');
+            forceScrollTop();
 
             if (tabName === 'weekly') {
                 updateWeeklyProgress();
