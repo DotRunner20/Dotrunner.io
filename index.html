@@ -491,7 +491,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
-            max-height: 180px;
+            max-height: 280px;
             overflow-y: auto;
         }
 
@@ -962,14 +962,28 @@
         async function loadCurrentUser() {
             // "Remember me" pointer — personal to this browser, so you land
             // straight back in the game without retyping your password.
+            // Stores the FULL last-known profile so a flaky connection can
+            // never accidentally sign you out.
             const raw = await storageGetSafe('dotrunner_current_user', false);
             if (raw) {
-                const remembered = JSON.parse(raw);
-                // Re-fetch the real account from shared storage so XP/streets
-                // claimed on another device are picked up too.
-                const freshRaw = await storageGetSafe(`dotrunner_account_${remembered.email.toLowerCase()}`, true);
-                currentUser = freshRaw ? JSON.parse(freshRaw) : remembered;
+                currentUser = JSON.parse(raw);
                 goToGame();
+
+                // Refresh from shared storage in the background so XP/streets
+                // claimed on another device are picked up, without risking
+                // a failed fetch logging you out.
+                try {
+                    const freshRaw = await storageGetSafe(`dotrunner_account_${currentUser.email.toLowerCase()}`, true);
+                    if (freshRaw) {
+                        currentUser = JSON.parse(freshRaw);
+                        document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
+                        updateWeeklyProgress();
+                        updateLeaderboard();
+                        await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
+                    }
+                } catch (e) {
+                    console.warn('Background account refresh failed, staying logged in with cached profile.', e);
+                }
             }
         }
 
@@ -1031,7 +1045,7 @@
                     const parsed = JSON.parse(storedRaw);
                     if (parsed.password === password) {
                         currentUser = parsed;
-                        await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
+                        await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
                         goToGame();
                     } else {
                         alert("Invalid password!");
@@ -1062,7 +1076,7 @@
                 };
 
                 await storageSetSafe(userKey, JSON.stringify(currentUser), true);
-                await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
+                await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
                 await upsertLeaderboardEntry();
                 goToGame();
             }
@@ -1409,7 +1423,7 @@
                     if (dot.eaten) return;
 
                     let dist = getDistance(playerLat, playerLng, dot.lat, dot.lng);
-                    if (dist <= 15) {
+                    if (dist <= 30) {
 
                         if (currentActiveStreet !== null && currentActiveStreet.id !== street.id) {
                             resetActiveStreetProgress(currentActiveStreet);
@@ -1499,6 +1513,7 @@
             document.getElementById('stat-streets').innerText = claimedStreetsInCurrentRun;
 
             currentUser.xp += 150;
+            currentUser.streetsClaimed += 1;
             document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
 
             // Persist the claim permanently for every user on the platform.
@@ -1508,6 +1523,14 @@
                 claimedAt: new Date().toISOString(),
                 stolenFromPrevious: wasStolen
             }), true);
+
+            // Also save the updated XP/streets total right away — so it
+            // shows up on the global leaderboard and for other accounts
+            // immediately, not only after you tap "Save Run".
+            const userKey = `dotrunner_account_${currentUser.email.toLowerCase()}`;
+            await storageSetSafe(userKey, JSON.stringify(currentUser), true);
+            await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
+            await upsertLeaderboardEntry();
         }
 
         function getDistance(lat1, lon1, lat2, lon2) {
@@ -1557,8 +1580,9 @@
         async function triggerSave() {
             clearInterval(timerInterval);
 
-            currentUser.streetsClaimed += claimedStreetsInCurrentRun;
-
+            // streetsClaimed and xp are already saved live as you claim
+            // each street (see claimStreet()) — this just records the run
+            // itself in your history and does a final safety save.
             if (!currentUser.runHistory) currentUser.runHistory = [];
             currentUser.runHistory.push({
                 date: new Date().toISOString(),
@@ -1569,7 +1593,7 @@
 
             const userKey = `dotrunner_account_${currentUser.email.toLowerCase()}`;
             await storageSetSafe(userKey, JSON.stringify(currentUser), true);
-            await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
+            await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
             await upsertLeaderboardEntry();
 
             document.getElementById('sum-time').innerText = document.getElementById('stat-time').innerText;
@@ -1738,7 +1762,8 @@
                 entries.push(liveEntry);
             }
 
-            entries.sort((a, b) => b.streetsClaimed - a.streetsClaimed);
+            entries.sort((a, b) => b.xp - a.xp);
+            entries = entries.slice(0, 50);
 
             leaderboardContainer.innerHTML = '';
             entries.forEach((player, index) => {
@@ -1748,8 +1773,8 @@
 
                 row.innerHTML = `
                     <span class="leader-rank">#${index + 1}</span>
-                    <span class="leader-name">${player.firstName} ${player.lastName}</span>
-                    <span class="leader-score">${player.streetsClaimed} claimed</span>
+                    <span class="leader-name">${player.firstName} ${player.lastName}<br><span style="font-size: 0.65rem; font-weight: 400; color: #a0a5c0;">${player.streetsClaimed} streets claimed</span></span>
+                    <span class="leader-score">${player.xp} XP</span>
                 `;
                 leaderboardContainer.appendChild(row);
             });
