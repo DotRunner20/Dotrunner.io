@@ -785,6 +785,10 @@
         <!-- Map container -->
         <div id="map"></div>
         <div id="loading-streets" class="loading-overlay">Loading streets from OSM...</div>
+        <div id="map-error" class="loading-overlay" style="flex-direction: column; gap: 10px; text-align: center; pointer-events: auto;">
+            <span>Kon de straten niet laden.</span>
+            <button class="btn btn-sec" style="padding: 0.5rem 1rem; font-size: 0.7rem;" onclick="retryFetchStreets()">Probeer opnieuw</button>
+        </div>
 
         <!-- Dashboard -->
         <div class="dashboard" id="dash-panel">
@@ -943,6 +947,9 @@
 
         let speedLimitViolationTimer = 0;
         let speedViolationActive = false;
+
+        let lastFetchedLat = null;
+        let lastFetchedLng = null;
 
         /* ---------- STORAGE HELPERS ----------
            Personal data (the "remember me" pointer) stays in this
@@ -1344,10 +1351,14 @@
 
         async function fetchRealStreets(lat, lng) {
             const loadingEl = document.getElementById('loading-streets');
+            const errorEl = document.getElementById('map-error');
             loadingEl.innerText = 'Loading streets from OSM...';
             loadingEl.style.display = 'block';
+            errorEl.style.display = 'none';
+            lastFetchedLat = lat;
+            lastFetchedLng = lng;
 
-            const radius = 400;
+            const radius = 900;
             const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|service|construction|platform|steps|path|cycleway"];out geom;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
@@ -1422,11 +1433,15 @@
                             }
 
                             let dots = [];
-                            const segmentStep = Math.max(1, Math.floor((coords.length - 1) / 4));
-                            for (let i = 0; i < 5; i++) {
-                                let targetIdx = Math.min(coords.length - 1, i * segmentStep);
-                                const dotLat = coords[targetIdx][0];
-                                const dotLng = coords[targetIdx][1];
+                            // Spread 5 dots evenly ALONG THE LENGTH of the street
+                            // (by real distance, not vertex index — some OSM ways
+                            // only have 2-3 points, others have dozens), and keep
+                            // them away from the very start/end of the street so
+                            // you don't flip onto a neighboring street right as
+                            // you're finishing or starting this one.
+                            const dotFractions = [0.12, 0.31, 0.50, 0.69, 0.88];
+                            dotFractions.forEach(frac => {
+                                const [dotLat, dotLng] = pointAtFraction(coords, frac);
 
                                 const dotMarker = L.circleMarker([dotLat, dotLng], {
                                     radius: 5,
@@ -1442,7 +1457,7 @@
                                     marker: dotMarker,
                                     eaten: false
                                 });
-                            }
+                            });
 
                             activeStreets.push({
                                 id: element.id,
@@ -1455,6 +1470,7 @@
                                 dots: dots,
                                 claimed: !!claimData,
                                 claimedBy: claimData ? claimData.claimedBy : null,
+                                claimedByEmail: claimData ? claimData.claimedByEmail : null,
                                 uniqueColor: uniqueColor,
                                 midPoint: midPoint,
                                 dotsClaimedCount: 0
@@ -1464,23 +1480,36 @@
                 }
             } catch (error) {
                 console.error("Error fetching streets: ", error);
+                document.getElementById('map-error').style.display = 'flex';
             } finally {
                 document.getElementById('loading-streets').style.display = 'none';
             }
         }
 
+        // "Try again" button on the map-error banner calls this — it just
+        // re-runs the same street fetch for wherever we last tried.
+        function retryFetchStreets() {
+            if (lastFetchedLat !== null && lastFetchedLng !== null) {
+                fetchRealStreets(lastFetchedLat, lastFetchedLng);
+            }
+        }
+
         function checkDotCollisions(playerLat, playerLng) {
+            // Generous enough to cover running on the sidewalk next to the
+            // road (not just the exact road centerline), plus normal GPS drift.
+            const PICKUP_RADIUS_METERS = 40;
+
             activeStreets.forEach(street => {
                 street.dots.forEach(dot => {
                     if (dot.eaten) return;
 
                     let dist = getDistance(playerLat, playerLng, dot.lat, dot.lng);
-                    if (dist <= 30) {
+                    if (dist <= PICKUP_RADIUS_METERS) {
 
-                        if (currentActiveStreet !== null && currentActiveStreet.id !== street.id) {
-                            resetActiveStreetProgress(currentActiveStreet);
-                        }
-
+                        // Switching to a different street no longer wipes out
+                        // progress on the one you left — dots you've already
+                        // eaten stay eaten, so you never have to run back and
+                        // redo a street from scratch.
                         currentActiveStreet = street;
                         dot.eaten = true;
                         map.removeLayer(dot.marker);
@@ -1509,16 +1538,6 @@
             });
         }
 
-        function resetActiveStreetProgress(street) {
-            street.dotsClaimedCount = 0;
-            street.dots.forEach(dot => {
-                dot.eaten = false;
-                if (!map.hasLayer(dot.marker)) {
-                    dot.marker.addTo(map);
-                }
-            });
-        }
-
         function updateDotsIndicator(eatenCount) {
             const circles = document.querySelectorAll('.dot-circle');
             circles.forEach((circle, index) => {
@@ -1536,10 +1555,12 @@
            platform who passes that street sees who owns it — until
            somebody else sweeps all 5 dots and takes it over. */
         async function claimStreet(street) {
-            const wasStolen = street.claimed && street.claimedBy !== `${currentUser.firstName} ${currentUser.lastName}`;
+            const wasStolen = street.claimed && street.claimedByEmail && street.claimedByEmail.toLowerCase() !== currentUser.email.toLowerCase();
+            const previousOwnerEmail = wasStolen ? street.claimedByEmail : null;
 
             street.claimed = true;
             street.claimedBy = `${currentUser.firstName} ${currentUser.lastName}`;
+            street.claimedByEmail = currentUser.email;
 
             street.polyline.setStyle({
                 color: 'var(--neon-green)',
@@ -1574,16 +1595,46 @@
             const claimsRegistry = await getClaimsRegistry();
             claimsRegistry[street.streetKey] = {
                 claimedBy: street.claimedBy,
+                claimedByEmail: currentUser.email,
                 streetName: street.name,
                 claimedAt: new Date().toISOString(),
                 stolenFromPrevious: wasStolen
             };
             await storageSetSafe('dotrunner_street_claims', JSON.stringify(claimsRegistry), true);
 
+            // If this street belonged to someone else, it no longer counts
+            // toward their total — take it off their tally so the leaderboard
+            // reflects who currently holds each street.
+            if (previousOwnerEmail) {
+                await decrementPreviousOwnerClaim(previousOwnerEmail);
+            }
+
             // Also save the updated XP/streets total right away — so it
             // shows up on the global leaderboard and for other accounts
             // immediately, not only after you tap "Save Run".
             await persistLiveProgress();
+        }
+
+        // When a street is stolen, the previous owner's account and
+        // leaderboard entry both need their streetsClaimed count reduced
+        // by one, since it's no longer theirs.
+        async function decrementPreviousOwnerClaim(ownerEmail) {
+            try {
+                const ownerKey = `dotrunner_account_${ownerEmail.toLowerCase()}`;
+                const raw = await storageGetSafe(ownerKey, true);
+                if (!raw) return;
+                const ownerAccount = JSON.parse(raw);
+                ownerAccount.streetsClaimed = Math.max(0, (ownerAccount.streetsClaimed || 0) - 1);
+                await storageSetSafe(ownerKey, JSON.stringify(ownerAccount), true);
+
+                const registry = await getLeaderboardRegistry();
+                if (registry[ownerEmail.toLowerCase()]) {
+                    registry[ownerEmail.toLowerCase()].streetsClaimed = ownerAccount.streetsClaimed;
+                    await storageSetSafe('dotrunner_leaderboard_all', JSON.stringify(registry), true);
+                }
+            } catch (e) {
+                console.warn('Could not update previous street owner', e);
+            }
         }
 
         /* Saves this account's current XP/streets to shared storage and
@@ -1610,6 +1661,33 @@
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
             return R * c;
+        }
+
+        // Walks a street's vertex list and returns the [lat, lng] that sits
+        // at `fraction` (0-1) of the street's TOTAL LENGTH — using real
+        // distance instead of vertex index means dots land at even spacing
+        // along the road no matter how many/few points OSM gave us.
+        function pointAtFraction(coords, fraction) {
+            if (coords.length === 1) return coords[0];
+            let total = 0;
+            const segLengths = [];
+            for (let i = 0; i < coords.length - 1; i++) {
+                const d = getDistance(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]);
+                segLengths.push(d);
+                total += d;
+            }
+            if (total === 0) return coords[0];
+            let target = total * fraction;
+            for (let i = 0; i < segLengths.length; i++) {
+                if (target <= segLengths[i]) {
+                    const t = segLengths[i] === 0 ? 0 : target / segLengths[i];
+                    const lat = coords[i][0] + (coords[i + 1][0] - coords[i][0]) * t;
+                    const lng = coords[i][1] + (coords[i + 1][1] - coords[i][1]) * t;
+                    return [lat, lng];
+                }
+                target -= segLengths[i];
+            }
+            return coords[coords.length - 1];
         }
 
         function toggleRun(forcePause = false) {
