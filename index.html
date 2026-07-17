@@ -732,7 +732,7 @@
                 </div>
                 <div class="input-group">
                     <label>Password</label>
-                    <input type="password" id="password" required placeholder="••••••••">
+                    <input type="password" id="password" required minlength="8" placeholder="At least 8 characters">
                 </div>
 
                 <button type="submit" class="btn" id="submit-btn">Register</button>
@@ -754,7 +754,10 @@
                     <span class="user-xp" id="nav-xp">0 XP</span>
                 </div>
             </div>
-            <div class="hero-tagline" style="font-size: 0.75rem; margin: 0; color: var(--neon-pink);">STREET SWEEP</div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="hero-tagline" style="font-size: 0.75rem; margin: 0; color: var(--neon-pink);">STREET SWEEP</div>
+                <span onclick="logout()" style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #a0a5c0; cursor: pointer; text-decoration: underline;">Sign Out</span>
+            </div>
         </nav>
 
         <!-- Location permission gate (merged from short version) -->
@@ -839,6 +842,11 @@
                     <div style="background: linear-gradient(90deg, var(--neon-blue), var(--neon-pink)); height: 100%; width: 0%;" id="weekly-bar"></div>
                 </div>
                 <p style="font-size: 0.75rem; color: #a0a5c0; margin-top: 1rem; text-align: center;">🔥 Active run streak is alive! 🏃‍♂️</p>
+
+                <p class="stat-label" style="margin-top: 1.5rem; margin-bottom: 0.5rem;">All-Time Runs</p>
+                <div class="leaderboard-list" id="run-history-list">
+                    <p style="font-size: 0.75rem; color: #a0a5c0; text-align: center; padding: 1rem;">No runs saved yet.</p>
+                </div>
             </div>
 
             <!-- Leaders Tab -->
@@ -952,9 +960,15 @@
         }
 
         async function loadCurrentUser() {
+            // "Remember me" pointer — personal to this browser, so you land
+            // straight back in the game without retyping your password.
             const raw = await storageGetSafe('dotrunner_current_user', false);
             if (raw) {
-                currentUser = JSON.parse(raw);
+                const remembered = JSON.parse(raw);
+                // Re-fetch the real account from shared storage so XP/streets
+                // claimed on another device are picked up too.
+                const freshRaw = await storageGetSafe(`dotrunner_account_${remembered.email.toLowerCase()}`, true);
+                currentUser = freshRaw ? JSON.parse(freshRaw) : remembered;
                 goToGame();
             }
         }
@@ -990,24 +1004,34 @@
             }
         }
 
+        /* Accounts live in SHARED storage now (not just this browser), so
+           it's a real account system: sign in from any device with the
+           same email + password and your XP, streets, and run history
+           come with you. */
         async function handleAuth(event) {
             event.preventDefault();
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
             const submitBtn = document.getElementById('submit-btn');
             const originalLabel = submitBtn.innerText;
+
+            if (!isLoginMode && password.length < 8) {
+                alert("Password must be at least 8 characters long.");
+                return;
+            }
+
             submitBtn.innerText = "Please wait...";
             submitBtn.disabled = true;
 
             const userKey = `dotrunner_account_${email.toLowerCase()}`;
 
             if (isLoginMode) {
-                const storedRaw = await storageGetSafe(userKey, false);
+                const storedRaw = await storageGetSafe(userKey, true);
                 if (storedRaw) {
                     const parsed = JSON.parse(storedRaw);
                     if (parsed.password === password) {
                         currentUser = parsed;
-                        await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
+                        await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
                         goToGame();
                     } else {
                         alert("Invalid password!");
@@ -1016,6 +1040,14 @@
                     alert("Account does not exist. Please register!");
                 }
             } else {
+                const existingRaw = await storageGetSafe(userKey, true);
+                if (existingRaw) {
+                    alert("That email already exists. Please sign in instead.");
+                    submitBtn.innerText = originalLabel;
+                    submitBtn.disabled = false;
+                    return;
+                }
+
                 const firstName = document.getElementById('first-name').value.trim();
                 const lastName = document.getElementById('last-name').value.trim();
 
@@ -1025,16 +1057,27 @@
                     email,
                     password,
                     xp: 0,
-                    streetsClaimed: 0
+                    streetsClaimed: 0,
+                    runHistory: []
                 };
 
-                await storageSetSafe(userKey, JSON.stringify(currentUser), false);
-                await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
+                await storageSetSafe(userKey, JSON.stringify(currentUser), true);
+                await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
+                await upsertLeaderboardEntry();
                 goToGame();
             }
 
             submitBtn.innerText = originalLabel;
             submitBtn.disabled = false;
+        }
+
+        async function logout() {
+            try {
+                await window.storage.delete('dotrunner_current_user', false);
+            } catch (e) {
+                // no remembered session to clear, that's fine
+            }
+            location.reload();
         }
 
         function goToGame() {
@@ -1140,8 +1183,6 @@
             const lng = position.coords.longitude;
             const rawSpeed = position.coords.speed;
 
-            map.setView([lat, lng], 17);
-
             if (rawSpeed !== null && rawSpeed !== undefined) {
                 const speedKmh = rawSpeed * 3.6;
                 if (speedKmh > 20) {
@@ -1158,6 +1199,11 @@
             }
 
             if (!userMarker) {
+                // Only recenter/zoom the map automatically on this first
+                // fix. After this, the user's own zoom/pan is respected —
+                // the map no longer snaps back to your position.
+                map.setView([lat, lng], 17);
+
                 const customIcon = L.divIcon({
                     className: 'custom-avatar-marker',
                     html: `<div class="avatar-glow">${currentUser.firstName[0].toUpperCase()}</div>`,
@@ -1207,7 +1253,15 @@
         }
 
         function onLocationError(error) {
-            document.getElementById('gps-warning').style.display = 'block';
+            const warningEl = document.getElementById('gps-warning');
+
+            if (error && error.code === error.PERMISSION_DENIED) {
+                warningEl.innerText = "Location is blocked. Please allow it: Chrome — tap the lock/site info icon in the address bar > Site settings > Location > Allow. Safari — Settings app > Safari (or Privacy & Security) > Location Services > Allow, then reload this page.";
+            } else {
+                warningEl.innerText = "GPS is required to track your run. Please click 'Allow' in your browser pop-up or enable location services in your phone's settings.";
+            }
+
+            warningEl.style.display = 'block';
             console.warn('GPS Error: ', error);
         }
 
@@ -1504,9 +1558,19 @@
             clearInterval(timerInterval);
 
             currentUser.streetsClaimed += claimedStreetsInCurrentRun;
+
+            if (!currentUser.runHistory) currentUser.runHistory = [];
+            currentUser.runHistory.push({
+                date: new Date().toISOString(),
+                distanceKm: totalDistanceRun,
+                durationSeconds: secondsElapsed,
+                streetsClaimed: claimedStreetsInCurrentRun
+            });
+
             const userKey = `dotrunner_account_${currentUser.email.toLowerCase()}`;
-            await storageSetSafe(userKey, JSON.stringify(currentUser), false);
-            await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
+            await storageSetSafe(userKey, JSON.stringify(currentUser), true);
+            await storageSetSafe('dotrunner_current_user', JSON.stringify({email: currentUser.email}), false);
+            await upsertLeaderboardEntry();
 
             document.getElementById('sum-time').innerText = document.getElementById('stat-time').innerText;
             document.getElementById('sum-distance').innerText = `${totalDistanceRun.toFixed(2)} km`;
@@ -1595,22 +1659,89 @@
             const percentage = Math.min((count / 10) * 100, 100);
             document.getElementById('weekly-info').innerText = `${count} / 10 Streets Claimed`;
             document.getElementById('weekly-bar').style.width = `${percentage}%`;
+            renderRunHistory();
         }
 
-        function updateLeaderboard() {
+        function renderRunHistory() {
+            const container = document.getElementById('run-history-list');
+            if (!container) return;
+            const history = currentUser.runHistory || [];
+
+            if (history.length === 0) {
+                container.innerHTML = '<p style="font-size: 0.75rem; color: #a0a5c0; text-align: center; padding: 1rem;">No runs saved yet.</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            [...history].reverse().forEach(run => {
+                const d = new Date(run.date);
+                const dateStr = d.toLocaleDateString();
+                const totalSecs = run.durationSeconds || 0;
+                const h = String(Math.floor(totalSecs / 3600)).padStart(2, '0');
+                const m = String(Math.floor((totalSecs % 3600) / 60)).padStart(2, '0');
+                const s = String(totalSecs % 60).padStart(2, '0');
+
+                const row = document.createElement('div');
+                row.className = 'leader-row';
+                row.innerHTML = `
+                    <span class="leader-name">${dateStr}</span>
+                    <span class="leader-score" style="color: var(--neon-blue);">${run.distanceKm.toFixed(2)} km</span>
+                    <span class="leader-score" style="margin-left: 10px;">${h}:${m}:${s}</span>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        /* Keeps this user's entry in the SHARED leaderboard index up to
+           date, so the ranking is real and global — every runner on the
+           platform sees the same list. */
+        async function upsertLeaderboardEntry() {
+            await storageSetSafe(`dotrunner_leaderboard_${currentUser.email.toLowerCase()}`, JSON.stringify({
+                firstName: currentUser.firstName,
+                lastName: currentUser.lastName,
+                email: currentUser.email,
+                streetsClaimed: currentUser.streetsClaimed,
+                xp: currentUser.xp
+            }), true);
+        }
+
+        async function updateLeaderboard() {
             const leaderboardContainer = document.getElementById('leaderboard');
+            leaderboardContainer.innerHTML = '<div class="pulse-loader">Loading global ranking...</div>';
+
+            let entries = [];
+            try {
+                const listResult = await window.storage.list('dotrunner_leaderboard_', true);
+                if (listResult && listResult.keys) {
+                    for (const key of listResult.keys) {
+                        const raw = await storageGetSafe(key, true);
+                        if (raw) entries.push(JSON.parse(raw));
+                    }
+                }
+            } catch (e) {
+                console.warn('Leaderboard load failed', e);
+            }
+
+            // Make sure the current user shows up even before their entry
+            // has synced, using their live in-memory stats.
+            const idx = entries.findIndex(e => e.email === currentUser.email);
+            const liveEntry = {
+                firstName: currentUser.firstName,
+                lastName: currentUser.lastName,
+                email: currentUser.email,
+                streetsClaimed: currentUser.streetsClaimed,
+                xp: currentUser.xp
+            };
+            if (idx >= 0) {
+                entries[idx] = liveEntry;
+            } else {
+                entries.push(liveEntry);
+            }
+
+            entries.sort((a, b) => b.streetsClaimed - a.streetsClaimed);
+
             leaderboardContainer.innerHTML = '';
-
-            const competitors = [
-                { firstName: "StravaMaster", lastName: "⚡", streetsClaimed: 18, email: "c1@test.com" },
-                { firstName: "NeonSweep", lastName: "🌌", streetsClaimed: 12, email: "c2@test.com" },
-                { firstName: "GhostRunner", lastName: "👤", streetsClaimed: 5, email: "c3@test.com" }
-            ];
-
-            competitors.push(currentUser);
-            competitors.sort((a, b) => b.streetsClaimed - a.streetsClaimed);
-
-            competitors.forEach((player, index) => {
+            entries.forEach((player, index) => {
                 const isUser = player.email === currentUser.email;
                 const row = document.createElement('div');
                 row.className = `leader-row ${isUser ? 'user-row' : ''}`;
