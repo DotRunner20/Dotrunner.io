@@ -1457,6 +1457,7 @@
 
                         currentUser.xp += 10;
                         document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
+                        persistLiveProgress();
 
                         if (street.dotsClaimedCount === 5) {
                             claimStreet(street);
@@ -1542,6 +1543,14 @@
             // Also save the updated XP/streets total right away — so it
             // shows up on the global leaderboard and for other accounts
             // immediately, not only after you tap "Save Run".
+            await persistLiveProgress();
+        }
+
+        /* Saves this account's current XP/streets to shared storage and
+           refreshes their global leaderboard entry. Called after every
+           dot pickup and every street claim, so progress is never stuck
+           only in memory on one account/device. */
+        async function persistLiveProgress() {
             const userKey = `dotrunner_account_${currentUser.email.toLowerCase()}`;
             await storageSetSafe(userKey, JSON.stringify(currentUser), true);
             await storageSetSafe('dotrunner_current_user', JSON.stringify(currentUser), false);
