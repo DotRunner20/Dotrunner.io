@@ -689,9 +689,9 @@
 
         .loading-overlay {
             position: absolute;
-            top: 50%;
+            top: 85px;
             left: 50%;
-            transform: translate(-50%, -50%);
+            transform: translateX(-50%);
             background: rgba(26, 26, 30, 0.95);
             padding: 1rem 2rem;
             border-radius: 30px;
@@ -950,6 +950,19 @@
 
         let lastFetchedLat = null;
         let lastFetchedLng = null;
+        let isFetchingStreets = false;
+        // Once you wander this far from wherever streets were last loaded,
+        // we quietly re-fetch around your new position. This is what lets
+        // you log in anywhere and keep running/claiming streets as you go,
+        // instead of being stuck near your very first GPS fix.
+        const STREET_REFETCH_DISTANCE_METERS = 500;
+
+        // Below this zoom level the map is "zoomed out to the world" —
+        // street names, dots and claim badges get hidden so you just see
+        // the plain map (and eventually the globe), instead of a screen
+        // full of clutter. Zooming back in brings it all back.
+        const STREET_DETAIL_MIN_ZOOM = 15;
+        let streetsVisible = true;
 
         /* ---------- STORAGE HELPERS ----------
            Personal data (the "remember me" pointer) stays in this
@@ -1165,12 +1178,19 @@
 
             map = L.map('map', {
                 zoomControl: false,
-                attributionControl: false
+                attributionControl: false,
+                minZoom: 2,
+                worldCopyJump: true
             }).setView([52.0907, 5.1214], 16);
 
             const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_nolabels/{z}/{x}/{y}{r}.png', {
-                maxZoom: 20
+                maxZoom: 20,
+                minZoom: 2
             }).addTo(map);
+
+            // Once you're zoomed out past street level, hide all the
+            // street clutter and just show the plain world map.
+            map.on('zoomend', updateStreetLayerVisibility);
 
             // Hide the "Loading map..." message as soon as tiles are in,
             // but never let it hang around more than 2.5s either way —
@@ -1190,6 +1210,33 @@
             // the second time / second account). Force a size recheck
             // once the screen has fully faded in.
             setTimeout(() => { if (map) map.invalidateSize(); }, 400);
+        }
+
+        // Shows/hides every street's polyline, label, claim badge and dots
+        // depending on how far you're zoomed out. Called on every zoomend,
+        // and again right after fresh streets are loaded from OSM.
+        function updateStreetLayerVisibility() {
+            if (!map) return;
+            const shouldShow = map.getZoom() >= STREET_DETAIL_MIN_ZOOM;
+            if (shouldShow === streetsVisible) return;
+            streetsVisible = shouldShow;
+
+            activeStreets.forEach(s => {
+                toggleLayerVisibility(s.polyline, shouldShow);
+                toggleLayerVisibility(s.labelTooltip, shouldShow);
+                if (s.claimMarker) toggleLayerVisibility(s.claimMarker, shouldShow);
+                s.dots.forEach(d => { if (d.marker) toggleLayerVisibility(d.marker, shouldShow); });
+            });
+        }
+
+        function toggleLayerVisibility(layer, shouldShow) {
+            if (!layer || !map) return;
+            const isOnMap = map.hasLayer(layer);
+            if (shouldShow && !isOnMap) {
+                map.addLayer(layer);
+            } else if (!shouldShow && isOnMap) {
+                map.removeLayer(layer);
+            }
         }
 
         function startLocationTracking() {
@@ -1276,6 +1323,19 @@
                 fetchRealStreets(lat, lng);
             } else {
                 userMarker.setLatLng([lat, lng]);
+
+                // Keep the loaded street data centered on wherever you
+                // actually are — this is what lets you run anywhere in
+                // the world instead of being stuck near your very first
+                // GPS fix. Only refetches once you've actually wandered
+                // away from the last loaded area, and never overlaps a
+                // fetch already in progress.
+                if (!isFetchingStreets && lastFetchedLat !== null && lastFetchedLng !== null) {
+                    const distFromLastFetch = getDistance(lastFetchedLat, lastFetchedLng, lat, lng);
+                    if (distFromLastFetch > STREET_REFETCH_DISTANCE_METERS) {
+                        fetchRealStreets(lat, lng);
+                    }
+                }
             }
 
             if (runActive && !speedViolationActive) {
@@ -1350,6 +1410,9 @@
         }
 
         async function fetchRealStreets(lat, lng) {
+            if (isFetchingStreets) return;
+            isFetchingStreets = true;
+
             const loadingEl = document.getElementById('loading-streets');
             const errorEl = document.getElementById('map-error');
             loadingEl.innerText = 'Loading streets from OSM...';
@@ -1359,7 +1422,10 @@
             lastFetchedLng = lng;
 
             const radius = 900;
-            const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|service|construction|platform|steps|path|cycleway"];out geom;`;
+            // Excludes motorways, trunk and primary roads (and other
+            // non-runnable ways) so you're only ever routed onto normal,
+            // safe streets — anywhere in the world, not just near home.
+            const query = `[out:json];way(around:${radius},${lat},${lng})[highway][highway!~"motorway|trunk|primary|service|construction|platform|steps|path|cycleway"];out geom;`;
             const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
             const borderColors = ['#ff007f', '#00d2ff', '#8a2be2', '#fc5200', '#ffd700'];
@@ -1478,11 +1544,18 @@
                         }
                     }
                 }
+
+                // Freshly-added layers default to visible — if you're
+                // currently zoomed out past street level, hide them
+                // straight away instead of flashing on screen.
+                streetsVisible = true;
+                updateStreetLayerVisibility();
             } catch (error) {
                 console.error("Error fetching streets: ", error);
                 document.getElementById('map-error').style.display = 'flex';
             } finally {
                 document.getElementById('loading-streets').style.display = 'none';
+                isFetchingStreets = false;
             }
         }
 
@@ -1603,8 +1676,8 @@
             await storageSetSafe('dotrunner_street_claims', JSON.stringify(claimsRegistry), true);
 
             // If this street belonged to someone else, it no longer counts
-            // toward their total — take it off their tally so the leaderboard
-            // reflects who currently holds each street.
+            // toward their total — take it off their tally (minus 1 street)
+            // so the leaderboard reflects who currently holds each street.
             if (previousOwnerEmail) {
                 await decrementPreviousOwnerClaim(previousOwnerEmail);
             }
