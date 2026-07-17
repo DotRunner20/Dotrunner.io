@@ -896,6 +896,27 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+    <!-- Firebase (compat SDK, no build step needed) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script>
+        // ============================================================
+        // TODO: replace with YOUR OWN config from Firebase console
+        // (Project settings -> General -> Your apps -> </> Web app)
+        // ============================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAMc0rPAQzqNzEjA6Mn-mbi3bVPSI6u0ok",
+            authDomain: "dotrunner.firebaseapp.com",
+            databaseURL: "https://dotrunner-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "dotrunner",
+            storageBucket: "dotrunner.firebasestorage.app",
+            messagingSenderId: "405096308211",
+            appId: "1:405096308211:web:02e06d76348b833dc90686"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+    </script>
+
     <script>
         let currentUser = null;
         let isLoginMode = false;
@@ -924,10 +945,12 @@
         let speedViolationActive = false;
 
         /* ---------- STORAGE HELPERS ----------
-           Personal data (accounts) uses shared:false.
-           Street claims use shared:true so EVERY user on the
-           platform sees the same claimed streets forever, until
-           somebody else runs that street and steals it. */
+           Personal data (the "remember me" pointer) stays in this
+           browser's localStorage (shared:false).
+           Everything shared between users (accounts, street claims,
+           leaderboard) is stored in Firebase Realtime Database under
+           the "dotrunner/" node (shared:true), so every runner on the
+           platform sees the same data, forever, from any device. */
 
         /* Forces the viewport back to the top. Mobile browsers can drift
            the page down (address bar collapse, keyboard closing, etc.),
@@ -942,18 +965,35 @@
         window.addEventListener('resize', () => { forceScrollTop(); if (map) map.invalidateSize(); });
         window.addEventListener('orientationchange', () => { forceScrollTop(); if (map) map.invalidateSize(); });
 
+        // Firebase Realtime Database keys can't contain . # $ [ ] — emails
+        // and our storage keys can, so we sanitize before using them as a path.
+        function sanitizeFirebaseKey(key) {
+            return key.replace(/[.#$\[\]]/g, (c) => ({
+                '.': '_DOT_', '#': '_HASH_', '$': '_DOLLAR_', '[': '_LB_', ']': '_RB_'
+            }[c]));
+        }
+
         async function storageGetSafe(key, shared) {
             try {
-                const result = await window.storage.get(key, shared);
-                return result ? result.value : null;
+                if (shared) {
+                    const snap = await db.ref('dotrunner/' + sanitizeFirebaseKey(key)).once('value');
+                    return snap.exists() ? snap.val() : null;
+                } else {
+                    return localStorage.getItem(key);
+                }
             } catch (e) {
+                console.warn('Storage read failed for', key, e);
                 return null;
             }
         }
 
         async function storageSetSafe(key, value, shared) {
             try {
-                await window.storage.set(key, value, shared);
+                if (shared) {
+                    await db.ref('dotrunner/' + sanitizeFirebaseKey(key)).set(value);
+                } else {
+                    localStorage.setItem(key, value);
+                }
             } catch (e) {
                 console.warn('Storage write failed for', key, e);
             }
@@ -1087,7 +1127,7 @@
 
         async function logout() {
             try {
-                await window.storage.delete('dotrunner_current_user', false);
+                localStorage.removeItem('dotrunner_current_user');
             } catch (e) {
                 // no remembered session to clear, that's fine
             }
