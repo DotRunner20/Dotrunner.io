@@ -1292,6 +1292,16 @@
             }
         }
 
+        /* All street claims live in ONE shared registry object instead of
+           a separate key per street. This means a single fast network
+           call loads every claim at once — far more reliable than one
+           request per street, which was the cause of claims sometimes
+           not showing up when switching accounts. */
+        async function getClaimsRegistry() {
+            const raw = await storageGetSafe('dotrunner_street_claims', true);
+            return raw ? JSON.parse(raw) : {};
+        }
+
         async function fetchRealStreets(lat, lng) {
             const loadingEl = document.getElementById('loading-streets');
             loadingEl.innerText = 'Loading streets from OSM...';
@@ -1306,7 +1316,10 @@
             try {
                 const controller = new AbortController();
                 const abortTimer = setTimeout(() => controller.abort(), 8000);
-                const response = await fetch(url, { signal: controller.signal });
+                const [response, claimsRegistry] = await Promise.all([
+                    fetch(url, { signal: controller.signal }),
+                    getClaimsRegistry()
+                ]);
                 clearTimeout(abortTimer);
                 const data = await response.json();
 
@@ -1331,12 +1344,11 @@
                             }
 
                             const uniqueColor = borderColors[idx % borderColors.length];
-                            const streetKey = `dotrunner_street_${element.id}`;
+                            const streetKey = String(element.id);
 
                             // Check if this street was already claimed by ANYONE on the
                             // platform. Claims are shared + permanent until stolen.
-                            const claimRaw = await storageGetSafe(streetKey, true);
-                            const claimData = claimRaw ? JSON.parse(claimRaw) : null;
+                            const claimData = claimsRegistry[streetKey] || null;
 
                             const polyline = L.polyline(coords, {
                                 color: claimData ? 'var(--neon-green)' : uniqueColor,
@@ -1516,13 +1528,16 @@
             currentUser.streetsClaimed += 1;
             document.getElementById('nav-xp').innerText = `${currentUser.xp} XP`;
 
-            // Persist the claim permanently for every user on the platform.
-            await storageSetSafe(street.streetKey, JSON.stringify({
+            // Persist the claim permanently for every user on the platform,
+            // in the single shared claims registry.
+            const claimsRegistry = await getClaimsRegistry();
+            claimsRegistry[street.streetKey] = {
                 claimedBy: street.claimedBy,
                 streetName: street.name,
                 claimedAt: new Date().toISOString(),
                 stolenFromPrevious: wasStolen
-            }), true);
+            };
+            await storageSetSafe('dotrunner_street_claims', JSON.stringify(claimsRegistry), true);
 
             // Also save the updated XP/streets total right away — so it
             // shows up on the global leaderboard and for other accounts
@@ -1716,52 +1731,49 @@
             });
         }
 
-        /* Keeps this user's entry in the SHARED leaderboard index up to
-           date, so the ranking is real and global — every runner on the
-           platform sees the same list. */
-        async function upsertLeaderboardEntry() {
-            await storageSetSafe(`dotrunner_leaderboard_${currentUser.email.toLowerCase()}`, JSON.stringify({
-                firstName: currentUser.firstName,
-                lastName: currentUser.lastName,
-                email: currentUser.email,
-                streetsClaimed: currentUser.streetsClaimed,
-                xp: currentUser.xp
-            }), true);
+        /* All leaderboard entries live in ONE shared registry object,
+           just like the street claims — one fast read/write instead of
+           a fragile call per account, so every registered player (even
+           at 0 XP) reliably shows up for everyone. */
+        async function getLeaderboardRegistry() {
+            const raw = await storageGetSafe('dotrunner_leaderboard_all', true);
+            return raw ? JSON.parse(raw) : {};
         }
 
-        async function updateLeaderboard() {
-            const leaderboardContainer = document.getElementById('leaderboard');
-            leaderboardContainer.innerHTML = '<div class="pulse-loader">Loading global ranking...</div>';
-
-            let entries = [];
-            try {
-                const listResult = await window.storage.list('dotrunner_leaderboard_', true);
-                if (listResult && listResult.keys) {
-                    for (const key of listResult.keys) {
-                        const raw = await storageGetSafe(key, true);
-                        if (raw) entries.push(JSON.parse(raw));
-                    }
-                }
-            } catch (e) {
-                console.warn('Leaderboard load failed', e);
-            }
-
-            // Make sure the current user shows up even before their entry
-            // has synced, using their live in-memory stats.
-            const idx = entries.findIndex(e => e.email === currentUser.email);
-            const liveEntry = {
+        async function upsertLeaderboardEntry() {
+            const registry = await getLeaderboardRegistry();
+            registry[currentUser.email.toLowerCase()] = {
                 firstName: currentUser.firstName,
                 lastName: currentUser.lastName,
                 email: currentUser.email,
                 streetsClaimed: currentUser.streetsClaimed,
                 xp: currentUser.xp
             };
-            if (idx >= 0) {
-                entries[idx] = liveEntry;
-            } else {
-                entries.push(liveEntry);
+            await storageSetSafe('dotrunner_leaderboard_all', JSON.stringify(registry), true);
+        }
+
+        async function updateLeaderboard() {
+            const leaderboardContainer = document.getElementById('leaderboard');
+            leaderboardContainer.innerHTML = '<div class="pulse-loader">Loading global ranking...</div>';
+
+            let registry = {};
+            try {
+                registry = await getLeaderboardRegistry();
+            } catch (e) {
+                console.warn('Leaderboard load failed', e);
             }
 
+            // Make sure the current user shows up even before their entry
+            // has synced, using their live in-memory stats.
+            registry[currentUser.email.toLowerCase()] = {
+                firstName: currentUser.firstName,
+                lastName: currentUser.lastName,
+                email: currentUser.email,
+                streetsClaimed: currentUser.streetsClaimed,
+                xp: currentUser.xp
+            };
+
+            let entries = Object.values(registry);
             entries.sort((a, b) => b.xp - a.xp);
             entries = entries.slice(0, 50);
 
